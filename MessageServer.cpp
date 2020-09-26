@@ -44,50 +44,102 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::LoadConfig(CSMTPConfig &Value) {
-            Value.Location() = Config()->IniFile().ReadString("smtp", "host", "localhost:25");
-            Value.UserName() = Config()->IniFile().ReadString("smtp", "username", "smtp");
-            Value.Password() = Config()->IniFile().ReadString("smtp", "password", "smtp");
-            Value.Domain() = Config()->IniFile().ReadString("smtp", "domain", "apostol-web-service.ru");
+        void CMessageServer::LoadConfig() {
+
+            const CString Prefix(Config()->Prefix());
+            CString configFile(Config()->IniFile().ReadString("process/MessageServer", "smtp", "conf/smtp.conf"));
+
+            if (!path_separator(configFile.front())) {
+                configFile = Prefix + configFile;
+            }
+
+            auto OnIniFileParseError = [&configFile](Pointer Sender, LPCTSTR lpszSectionName, LPCTSTR lpszKeyName,
+                                                   LPCTSTR lpszValue, LPCTSTR lpszDefault, int Line)
+            {
+                if ((lpszValue == nullptr) || (lpszValue[0] == '\0')) {
+                    if ((lpszDefault == nullptr) || (lpszDefault[0] == '\0'))
+                        Log()->Error(APP_LOG_EMERG, 0, ConfMsgEmpty, lpszSectionName, lpszKeyName, configFile.c_str(), Line);
+                } else {
+                    if ((lpszDefault == nullptr) || (lpszDefault[0] == '\0'))
+                        Log()->Error(APP_LOG_EMERG, 0, ConfMsgInvalidValue, lpszSectionName, lpszKeyName, lpszValue,
+                                     configFile.c_str(), Line);
+                    else
+                        Log()->Error(APP_LOG_EMERG, 0, ConfMsgInvalidValue _T(" - ignored and set by default: \"%s\""), lpszSectionName, lpszKeyName, lpszValue,
+                                     configFile.c_str(), Line, lpszDefault);
+                }
+            };
+
+            m_Configs.Clear();
+
+            if (FileExists(configFile.c_str())) {
+                CIniFile smtpFile(configFile.c_str());
+                smtpFile.OnIniFileParseError(OnIniFileParseError);
+
+                CStringList Addresses;
+                smtpFile.ReadSections(&Addresses);
+
+                for (int i = 0; i < Addresses.Count(); i++) {
+                    const auto& Address = Addresses[i];
+                    int Index = m_Configs.AddPair(Address, CSMTPConfig());
+                    auto& Config = m_Configs[Index].Value();
+                    InitConfig(smtpFile, Address, Config);
+                }
+
+                auto& defaultConfig = m_Configs.Default();
+                if (defaultConfig.Name().IsEmpty()) {
+                    defaultConfig.Name() = _T("default");
+                    auto& Config = defaultConfig.Value();
+                    InitConfig(smtpFile, defaultConfig.Name(), Config);
+                }
+            } else {
+                Log()->Error(APP_LOG_EMERG, 0, APP_FILE_NOT_FOUND, configFile.c_str());
+            }
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CMessageServer::InitConfig(const CIniFile &IniFile, const CString &Address, CSMTPConfig &Value) {
+            Value.Location() = IniFile.ReadString(Address, "host", "localhost:25");
+            Value.UserName() = IniFile.ReadString(Address, "username", "smtp");
+            Value.Password() = IniFile.ReadString(Address, "password", "smtp");
         }
         //--------------------------------------------------------------------------------------------------------------
 
         CSMTPClient *CMessageServer::GetSMTPClient(const CSMTPConfig &Config) {
 
-            auto LCLient = m_ClientManager.Add(Config);
+            auto pClient = m_ClientManager.Add(Config);
 
-            LCLient->PollStack(PQServer().PollStack());
+            pClient->PollStack(PQServer().PollStack());
 
-            LCLient->ClientName() = Application()->Title();
+            pClient->ClientName() = Application()->Title();
 
-            LCLient->AutoConnect(true);
+            pClient->AutoConnect(true);
 
 #if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
-            LCLient->OnVerbose([this](auto && Sender, auto && AConnection, auto && AFormat, auto && args) { DoVerbose(Sender, AConnection, AFormat, args); });
-            LCLient->OnAccessLog([this](auto && AConnection) { DoAccessLog(AConnection); });
-            LCLient->OnException([this](auto && AConnection, auto && AException) { DoException(AConnection, AException); });
-            LCLient->OnEventHandlerException([this](auto && AHandler, auto && AException) { DoServerEventHandlerException(AHandler, AException); });
-            LCLient->OnDisconnected([this](auto && Sender) { DoDisconnected(Sender); });
-            LCLient->OnConnected([this](auto && Sender) { DoConnected(Sender); });
-            LCLient->OnDisconnected([this](auto && Sender) { DoDisconnected(Sender); });
-            LCLient->OnNoCommandHandler([this](auto && Sender, auto && AData, auto && AConnection) { DoNoCommandHandler(Sender, AData, AConnection); });
+            pClient->OnVerbose([this](auto && Sender, auto && AConnection, auto && AFormat, auto && args) { DoVerbose(Sender, AConnection, AFormat, args); });
+            pClient->OnAccessLog([this](auto && AConnection) { DoAccessLog(AConnection); });
+            pClient->OnException([this](auto && AConnection, auto && AException) { DoException(AConnection, AException); });
+            pClient->OnEventHandlerException([this](auto && AHandler, auto && AException) { DoServerEventHandlerException(AHandler, AException); });
+            pClient->OnDisconnected([this](auto && Sender) { DoDisconnected(Sender); });
+            pClient->OnConnected([this](auto && Sender) { DoConnected(Sender); });
+            pClient->OnDisconnected([this](auto && Sender) { DoDisconnected(Sender); });
+            pClient->OnNoCommandHandler([this](auto && Sender, auto && AData, auto && AConnection) { DoNoCommandHandler(Sender, AData, AConnection); });
 
-            LCLient->OnRequest([this](auto && Sender) { DoRequest(Sender); });
-            LCLient->OnReply([this](auto && Sender) { DoReply(Sender); });
+            pClient->OnRequest([this](auto && Sender) { DoRequest(Sender); });
+            pClient->OnReply([this](auto && Sender) { DoReply(Sender); });
 #else
-            LCLient->OnVerbose(std::bind(&CMessageServer::DoVerbose, this, _1, _2, _3, _4));
-            LCLient->OnAccessLog(std::bind(&CMessageServer::DoAccessLog, this, _1));
-            LCLient->OnException(std::bind(&CMessageServer::DoException, this, _1, _2));
-            LCLient->OnEventHandlerException(std::bind(&CMessageServer::DoServerEventHandlerException, this, _1, _2));
-            LCLient->OnConnected(std::bind(&CMessageServer::DoConnected, this, _1));
-            LCLient->OnDisconnected(std::bind(&CMessageServer::DoDisconnected, this, _1));
-            LCLient->OnNoCommandHandler(std::bind(&CMessageServer::DoNoCommandHandler, this, _1, _2, _3));
+            pClient->OnVerbose(std::bind(&CMessageServer::DoVerbose, this, _1, _2, _3, _4));
+            pClient->OnAccessLog(std::bind(&CMessageServer::DoAccessLog, this, _1));
+            pClient->OnException(std::bind(&CMessageServer::DoException, this, _1, _2));
+            pClient->OnEventHandlerException(std::bind(&CMessageServer::DoServerEventHandlerException, this, _1, _2));
+            pClient->OnConnected(std::bind(&CMessageServer::DoConnected, this, _1));
+            pClient->OnDisconnected(std::bind(&CMessageServer::DoDisconnected, this, _1));
+            pClient->OnNoCommandHandler(std::bind(&CMessageServer::DoNoCommandHandler, this, _1, _2, _3));
 
-            LCLient->OnRequest(std::bind(&CMessageServer::DoRequest, this, _1));
-            LCLient->OnReply(std::bind(&CMessageServer::DoReply, this, _1));
+            pClient->OnRequest(std::bind(&CMessageServer::DoRequest, this, _1));
+            pClient->OnReply(std::bind(&CMessageServer::DoReply, this, _1));
 #endif
 
-            return LCLient;
+            return pClient;
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -101,6 +153,8 @@ namespace Apostol {
             InitSignals();
 
             Config()->Reload();
+
+            LoadConfig();
 
             SetUser(Config()->User(), Config()->Group());
 
@@ -201,14 +255,12 @@ namespace Apostol {
                         }
                     }
                 } catch (Delphi::Exception::Exception &E) {
-                    m_CheckDate = Now() + (CDateTime) 60 / SecsPerDay;
-                    Log()->Error(APP_LOG_EMERG, 0, E.what());
+                    DoError(E);
                 }
             };
 
             auto OnException = [this](CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
-                m_CheckDate = Now() + (CDateTime) 60 / SecsPerDay;
-                Log()->Error(APP_LOG_EMERG, 0, E.what());
+                DoError(E);
             };
 
             const auto &ConnInfo = Config()->PostgresConnInfo()["helper"].Value();
@@ -243,7 +295,11 @@ namespace Apostol {
                     PQQuoteLiteral(m_Auth.Password).c_str()
             ));
 
-            ExecSQL(SQL, nullptr, OnExecuted, OnException);
+            try {
+                ExecSQL(SQL, nullptr, OnExecuted, OnException);
+            } catch (Delphi::Exception::Exception &E) {
+                DoError(E);
+            }
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -254,25 +310,20 @@ namespace Apostol {
                 CPQueryResults Result;
                 CStringList SQL;
 
+                CSMTPClient *pSMTPClient = nullptr;
+
                 try {
                     CApostolModule::QueryToResults(APollQuery, Result);
 
                     const auto &Authenticate = Result[0];
-                    if (Authenticate[0].Values("authorized") != "t") {
-                        m_Auth.Clear();
-                        return;
-                    }
+                    if (Authenticate[0].Values("authorized") != "t")
+                        throw Delphi::Exception::EDBError(Authenticate[0].Values("message").c_str());
 
                     const auto &Messages = Result[2]; // Skip api.su
 
                     if (Messages.Count() > 0 ) {
 
-                        AddAuthorize(SQL);
-
-                        CSMTPConfig LConfig;
-                        LoadConfig(LConfig);
-
-                        auto LSMTPClient = GetSMTPClient(LConfig);
+                        CString AddrFrom;
 
                         for (int Row = 0; Row < Messages.Count(); Row++) {
 
@@ -283,15 +334,27 @@ namespace Apostol {
                             if (m_ClientManager.InProgress(MsgId))
                                 continue;
 
-                            auto &LMessage = LSMTPClient->NewMessage();
+                            const auto &From = Record.Values("addressfrom");
+                            const auto &To = Record.Values("addressto");
 
-                            const auto &from = Record.Values("addressfrom");
-                            const auto &to = Record.Values("addressto");
+                            if (AddrFrom.IsEmpty())
+                                AddrFrom = From;
+
+                            if (AddrFrom != From) {
+                                AddrFrom = From;
+                                pSMTPClient->SendMail();
+                                pSMTPClient = nullptr;
+                            }
+
+                            if (pSMTPClient == nullptr) {
+                                pSMTPClient = GetSMTPClient(m_Configs[From].Value());
+                            }
+
+                            auto &LMessage = pSMTPClient->NewMessage();
 
                             LMessage.MsgId() = MsgId;
-                            LMessage.MessageId() = CString().Format("<%s@%s>", Record.Values("code").c_str(), LConfig.Domain().c_str());
-                            LMessage.From() = from;
-                            LMessage.To() = to;
+                            LMessage.From() = From;
+                            LMessage.To() = To;
                             LMessage.Subject() = Record.Values("subject");
 
                             LMessage.Body().Add("MIME-Version: 1.0" );
@@ -303,42 +366,33 @@ namespace Apostol {
                                 LMessage.Body().Add("Date: " + LDate);
                             }
 
-                            LMessage.Body().Add("Message-ID: " + LMessage.MessageId());
-                            LMessage.Body().Add("From: " + from);
-                            LMessage.Body().Add("To: " + to);
-                            LMessage.Body().Add("Subject: " + LMessage.Subject());
+                            LMessage.Body().Add("From: " + From);
+                            LMessage.Body().Add("To: " + To);
+                            LMessage.Body().Add("Subject: " + CSMTPMessage::encodingSubject(LMessage.Subject())); /* Non-ASCII Text, see RFC 1342 */
                             LMessage.Body().Add("Content-Type: text/html; charset=UTF8");
                             LMessage.Body().Add("Content-Transfer-Encoding: BASE64");
-                            LMessage.Body().Add(""); /* empty line to divide headers from body, see RFC5322 */
+                            LMessage.Body().Add(""); /* empty line to divide headers from body, see RFC 5322 */
 
                             LMessage.Body() << base64_encode(Record.Values("body"));
 
 #if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
                             LMessage.OnDone([this](auto && Message) { DoDone(Message); });
-                            LMessage.OnFail([this](auto && Message) { DoFail(Message); });
+                            LMessage.OnFail([this](auto && Message, auto && Error) { DoFail(Message, Error); });
 #else
                             LMessage.OnDone(std::bind(&CMessageServer::DoDone, this, _1));
-                            LMessage.OnFail(std::bind(&CMessageServer::DoFail, this, _1));
+                            LMessage.OnFail(std::bind(&CMessageServer::DoFail, this, _1, _2));
 #endif
-                            SQL.Add(CString().Format("SELECT * FROM api.run_action(%s, 'send');", LMessage.MsgId().c_str()));
                         }
 
-                        try {
-                            ExecSQL(SQL);
-                            LSMTPClient->SendMail();
-                        } catch (Delphi::Exception::Exception &E) {
-                            Log()->Error(APP_LOG_EMERG, 0, E.what());
-                        }
+                        pSMTPClient->SendMail();
                     }
                 } catch (Delphi::Exception::Exception &E) {
-                    m_CheckDate = Now() + (CDateTime) 60 / SecsPerDay;
-                    Log()->Error(APP_LOG_EMERG, 0, E.what());
+                    DoError(E);
                 }
             };
 
             auto OnException = [this](CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
-                m_CheckDate = Now() + (CDateTime) 60 / SecsPerDay;
-                Log()->Error(APP_LOG_EMERG, 0, E.what());
+                DoError(E);
             };
 
             CStringList SQL;
@@ -349,8 +403,15 @@ namespace Apostol {
             try {
                 ExecSQL(SQL, nullptr, OnExecuted, OnException);
             } catch (Delphi::Exception::Exception &E) {
-                Log()->Error(APP_LOG_EMERG, 0, E.what());
+                DoError(E);
             }
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CMessageServer::DoError(const Delphi::Exception::Exception &E) {
+            m_Auth.Clear();
+            m_CheckDate = Now() + (CDateTime) 30 / SecsPerDay;
+            Log()->Error(APP_LOG_EMERG, 0, E.what());
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -388,60 +449,89 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::DoDone(CSMTPMessage *AMessage) {
+        void CMessageServer::DoSend(const CSMTPMessage &Message) {
             CStringList SQL;
 
             AddAuthorize(SQL);
-            SQL.Add(CString().Format("SELECT * FROM api.run_action(%s, 'done');", AMessage->MsgId().c_str()));
+            SQL.Add(CString().Format("SELECT * FROM api.run_action(%s, 'send');", Message.MsgId().c_str()));
 
             try {
                 ExecSQL(SQL);
             } catch (Delphi::Exception::Exception &E) {
-                Log()->Error(APP_LOG_EMERG, 0, E.what());
+                DoError(E);
             }
 
-            Log()->Error(APP_LOG_NOTICE, 0, "[%s] Message sent.", AMessage->MessageId().c_str());
+            Log()->Error(APP_LOG_NOTICE, 0, "[%s] Message sending.", Message.MsgId().c_str());
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::DoFail(CSMTPMessage *AMessage) {
+        void CMessageServer::DoCancel(const CSMTPMessage &Message, const CString &Error) {
             CStringList SQL;
 
             AddAuthorize(SQL);
-            SQL.Add(CString().Format("SELECT * FROM api.run_action(%s, 'fail');", AMessage->MsgId().c_str()));
+            SQL.Add(CString().Format("SELECT * FROM api.run_action(%s, 'cancel');", Message.MsgId().c_str()));
+            SQL.Add(CString().Format("SELECT * FROM api.set_object_label(%s, %s);",
+                                     Message.MsgId().c_str(),
+                                     PQQuoteLiteral(Error).c_str()
+            ));
 
             try {
                 ExecSQL(SQL);
             } catch (Delphi::Exception::Exception &E) {
-                Log()->Error(APP_LOG_EMERG, 0, E.what());
+                DoError(E);
             }
 
-            Log()->Error(APP_LOG_EMERG, 0, "[%s] Message not sent.", AMessage->MessageId().c_str());
+            Log()->Error(APP_LOG_EMERG, 0, "[%s] Sent message canceled.", Message.MsgId().c_str());
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::DoRequest(CObject *Sender) {
-            auto LConnection = dynamic_cast<CSMTPConnection *>(Sender);
-            const auto& LCommand = LConnection->Command();
-            CMemoryStream Stream;
-            LCommand.ToBuffers(&Stream);
-            CString S;
-            S.LoadFromStream(&Stream);
-            DebugMessage("C: %s", S.c_str());
+        void CMessageServer::DoDone(const CSMTPMessage &Message) {
+            CStringList SQL;
+
+            AddAuthorize(SQL);
+            SQL.Add(CString().Format("SELECT * FROM api.run_action(%s, 'done');", Message.MsgId().c_str()));
+            SQL.Add(CString().Format("SELECT * FROM api.set_object_label(%s, %s);",
+                Message.MsgId().c_str(),
+                PQQuoteLiteral(Message.MessageId()).c_str()
+            ));
+
+            try {
+                ExecSQL(SQL);
+            } catch (Delphi::Exception::Exception &E) {
+                DoError(E);
+            }
+
+            Log()->Error(APP_LOG_NOTICE, 0, "[%s] Message sent successfully.", Message.MsgId().c_str());
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::DoReply(CObject *Sender) {
-            auto LConnection = dynamic_cast<CSMTPConnection *>(Sender);
-            const auto& LCommand = LConnection->Command();
-            for (int i = 0; i < LCommand.Reply().Count(); ++i)
-              DebugMessage("S: %s\n", LCommand.Reply()[i].c_str());
+        void CMessageServer::DoFail(const CSMTPMessage &Message, const CString &Error) {
+            CStringList SQL;
+
+            AddAuthorize(SQL);
+            SQL.Add(CString().Format("SELECT * FROM api.run_action(%s, 'fail');", Message.MsgId().c_str()));
+            SQL.Add(CString().Format("SELECT * FROM api.set_object_label(%s, %s);",
+                Message.MsgId().c_str(),
+                PQQuoteLiteral(Error).c_str()
+            ));
+
+            try {
+                ExecSQL(SQL);
+            } catch (Delphi::Exception::Exception &E) {
+                DoError(E);
+            }
+
+            Log()->Error(APP_LOG_EMERG, 0, "[%s] Message was not sent.", Message.MsgId().c_str());
         }
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::DoConnected(CObject *Sender) {
             auto LConnection = dynamic_cast<CSMTPConnection *>(Sender);
             if (LConnection != nullptr) {
+                auto LClient = dynamic_cast<CSMTPClient *> (LConnection->Client());
+                for (int i = 0; i < LClient->Messages().Count(); ++i)
+                    DoSend(LClient->Messages()[i]);
+
                 Log()->Message(_T("[%s:%d] Mail client connected."), LConnection->Socket()->Binding()->PeerIP(),
                                LConnection->Socket()->Binding()->PeerPort());
             }
@@ -461,9 +551,46 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
+        void CMessageServer::DoRequest(CObject *Sender) {
+            auto LConnection = dynamic_cast<CSMTPConnection *>(Sender);
+            const auto& LCommand = LConnection->Command();
+            CMemoryStream Stream;
+            LCommand.ToBuffers(&Stream);
+            CString S;
+            S.LoadFromStream(&Stream);
+            DebugMessage("C: %s", S.c_str());
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CMessageServer::DoReply(CObject *Sender) {
+            auto LConnection = dynamic_cast<CSMTPConnection *>(Sender);
+            const auto& LCommand = LConnection->Command();
+            DebugMessage("S: %s", LCommand.Reply().Text().c_str());
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
         void CMessageServer::DoException(CTCPConnection *AConnection, const Delphi::Exception::Exception &E) {
-            Log()->Error(APP_LOG_EMERG, 0, E.what());
-            sig_reopen = 1;
+            auto LConnection = dynamic_cast<CSMTPConnection *> (AConnection);
+            auto LClient = dynamic_cast<CSMTPClient *> (LConnection->Client());
+
+            CStringList SQL;
+
+            AddAuthorize(SQL);
+            for (int i = 0; i < LClient->Messages().Count(); ++i) {
+                const auto& Message = LClient->Messages()[i];
+                SQL.Add(CString().Format("SELECT * FROM api.set_object_label(%s, %s);",
+                                         Message.MsgId().c_str(),
+                                         PQQuoteLiteral(E.what()).c_str()
+                ));
+            }
+
+            m_CheckDate = Now() + (CDateTime) 10 / SecsPerDay;
+
+            try {
+                ExecSQL(SQL);
+            } catch (Delphi::Exception::Exception &E) {
+                DoError(E);
+            }
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -486,7 +613,6 @@ namespace Apostol {
 
         void CMessageServer::DoPostgresQueryExecuted(CPQPollQuery *APollQuery) {
             CPQResult *Result;
-
             try {
                 for (int I = 0; I < APollQuery->Count(); I++) {
                     Result = APollQuery->Results(I);

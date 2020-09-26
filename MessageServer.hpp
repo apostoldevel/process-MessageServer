@@ -61,12 +61,17 @@ namespace Apostol {
 
         //--------------------------------------------------------------------------------------------------------------
 
+        typedef TPairs<CSMTPConfig> CSMTPConfigs;
+        //--------------------------------------------------------------------------------------------------------------
+
         class CMessageServer: public CProcessCustom {
             typedef CProcessCustom inherited;
 
         private:
 
             CAuth m_Auth;
+
+            CSMTPConfigs m_Configs;
 
             int m_HeartbeatInterval;
 
@@ -76,6 +81,7 @@ namespace Apostol {
 
             void InitServer();
             void CheckMessage();
+            void LoadConfig();
 
             void BeforeRun() override;
             void AfterRun() override;
@@ -87,9 +93,13 @@ namespace Apostol {
             void DoTimer(CPollEventHandler *AHandler) override;
 
             void DoHeartbeat();
+            void DoError(const Delphi::Exception::Exception &E);
 
-            void DoDone(CSMTPMessage *AMessage);
-            void DoFail(CSMTPMessage *AMessage);
+            void DoSend(const CSMTPMessage &Message);
+            void DoDone(const CSMTPMessage &Message);
+
+            void DoCancel(const CSMTPMessage &Message, const CString &Error);
+            void DoFail(const CSMTPMessage &Message, const CString &Error);
 
             void DoRequest(CObject *Sender);
             void DoReply(CObject *Sender);
@@ -115,7 +125,7 @@ namespace Apostol {
 
             void Run() override;
 
-            static void LoadConfig(CSMTPConfig &Value);
+            static void InitConfig(const CIniFile &IniFile, const CString &Address, CSMTPConfig &Value);
 
             CSMTPClient *GetSMTPClient(const CSMTPConfig &Config);
 
