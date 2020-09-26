@@ -269,16 +269,9 @@ namespace Apostol {
             m_Auth.Password = ConnInfo["password"];
 
             m_Auth.Agent = "Message Server";
+            m_Auth.Host = CApostolModule::GetIPByHostName(CApostolModule::GetHostName());
 
-            CString LHost;
-            LHost.SetLength(NI_MAXHOST);
-            if (GStack->GetHostName(LHost.Data(), LHost.Size())) {
-                LHost.Truncate();
-                if (!LHost.IsEmpty()) {
-                    m_Auth.Host.SetLength(16);
-                    GStack->GetIPByName(LHost.c_str(), m_Auth.Host.Data(), m_Auth.Host.Size());
-                }
-            } else {
+            if (m_Auth.Host.IsEmpty()) {
                 m_Auth.Host = _T("127.0.0.1");
             }
 
@@ -417,20 +410,17 @@ namespace Apostol {
 
         void CMessageServer::DoHeartbeat() {
             auto now = Now();
-            try {
-                if ((now >= m_CheckDate)) {
-                    if (m_Auth.Session.IsEmpty()) {
-                        InitServer();
-                    } else {
-                        CheckMessage();
-                    }
 
-                    m_CheckDate = now + (CDateTime) m_HeartbeatInterval / SecsPerDay;
-
-                    m_ClientManager.CleanUp();
+            if ((now >= m_CheckDate)) {
+                if (m_Auth.Session.IsEmpty()) {
+                    InitServer();
+                } else {
+                    CheckMessage();
                 }
-            } catch (Delphi::Exception::Exception &E) {
-                Log()->Error(APP_LOG_EMERG, 0, E.what());
+
+                m_CheckDate = now + (CDateTime) m_HeartbeatInterval / SecsPerDay;
+
+                m_ClientManager.CleanUp();
             }
         }
         //--------------------------------------------------------------------------------------------------------------
