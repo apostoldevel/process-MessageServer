@@ -10,7 +10,7 @@ Module Name:
 
 Notices:
 
-  Proccess: Mail Server
+  Process: Mail Server
 
 Author:
 
