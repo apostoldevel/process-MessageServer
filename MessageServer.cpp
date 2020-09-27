@@ -44,29 +44,29 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::LoadConfig() {
+        void CMessageServer::LoadSMTPConfig(const CString &FileName) {
 
             const CString Prefix(Config()->Prefix());
-            CString configFile(Config()->IniFile().ReadString("process/MessageServer", "config", "conf/smtp.conf"));
+            CString ConfigFile(FileName);
 
-            if (!path_separator(configFile.front())) {
-                configFile = Prefix + configFile;
+            if (!path_separator(ConfigFile.front())) {
+                ConfigFile = Prefix + ConfigFile;
             }
 
             m_Configs.Clear();
 
-            if (FileExists(configFile.c_str())) {
-                CIniFile IniFile(configFile.c_str());
+            if (FileExists(ConfigFile.c_str())) {
+                CIniFile IniFile(ConfigFile.c_str());
                 IniFile.OnIniFileParseError(OnIniFileParseError);
 
-                CStringList Addresses;
-                IniFile.ReadSections(&Addresses);
+                CStringList Sections;
+                IniFile.ReadSections(&Sections);
 
-                for (int i = 0; i < Addresses.Count(); i++) {
-                    const auto& Address = Addresses[i];
-                    int Index = m_Configs.AddPair(Address, CSMTPConfig());
+                for (int i = 0; i < Sections.Count(); i++) {
+                    const auto& Section = Sections[i];
+                    int Index = m_Configs.AddPair(Section, CSMTPConfig());
                     auto& Config = m_Configs[Index].Value();
-                    InitConfig(IniFile, Address, Config);
+                    InitConfig(IniFile, Section, Config);
                 }
 
                 auto& defaultConfig = m_Configs.Default();
@@ -76,15 +76,15 @@ namespace Apostol {
                     InitConfig(IniFile, defaultConfig.Name(), Config);
                 }
             } else {
-                Log()->Error(APP_LOG_EMERG, 0, APP_FILE_NOT_FOUND, configFile.c_str());
+                Log()->Error(APP_LOG_EMERG, 0, APP_FILE_NOT_FOUND, ConfigFile.c_str());
             }
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::InitConfig(const CIniFile &IniFile, const CString &Profile, CSMTPConfig &Value) {
-            Value.Location() = IniFile.ReadString(Profile, "host", "localhost:25");
-            Value.UserName() = IniFile.ReadString(Profile, "username", "smtp");
-            Value.Password() = IniFile.ReadString(Profile, "password", "smtp");
+        void CMessageServer::InitConfig(const CIniFile &IniFile, const CString &Section, CSMTPConfig &Config) {
+            Config.Location() = IniFile.ReadString(Section, "host", "localhost:25");
+            Config.UserName() = IniFile.ReadString(Section, "username", "smtp");
+            Config.Password() = IniFile.ReadString(Section, "password", "smtp");
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -138,7 +138,7 @@ namespace Apostol {
 
             Config()->Reload();
 
-            LoadConfig();
+            LoadSMTPConfig(Config()->IniFile().ReadString("process/MessageServer", "smtp", "conf/smtp.conf"));
 
             SetUser(Config()->User(), Config()->Group());
 

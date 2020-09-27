@@ -81,7 +81,6 @@ namespace Apostol {
 
             void InitServer();
             void CheckMessage();
-            void LoadConfig();
 
             void BeforeRun() override;
             void AfterRun() override;
@@ -125,7 +124,8 @@ namespace Apostol {
 
             void Run() override;
 
-            static void InitConfig(const CIniFile &IniFile, const CString &Address, CSMTPConfig &Value);
+            void LoadSMTPConfig(const CString &FileName);
+            static void InitConfig(const CIniFile &IniFile, const CString &Section, CSMTPConfig &Config);
 
             CSMTPClient *GetSMTPClient(const CSMTPConfig &Config);
 
