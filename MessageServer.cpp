@@ -47,49 +47,33 @@ namespace Apostol {
         void CMessageServer::LoadConfig() {
 
             const CString Prefix(Config()->Prefix());
-            CString configFile(Config()->IniFile().ReadString("process/MessageServer", "smtp", "conf/smtp.conf"));
+            CString configFile(Config()->IniFile().ReadString("process/MessageServer", "config", "conf/smtp.conf"));
 
             if (!path_separator(configFile.front())) {
                 configFile = Prefix + configFile;
             }
 
-            auto OnIniFileParseError = [&configFile](Pointer Sender, LPCTSTR lpszSectionName, LPCTSTR lpszKeyName,
-                                                   LPCTSTR lpszValue, LPCTSTR lpszDefault, int Line)
-            {
-                if ((lpszValue == nullptr) || (lpszValue[0] == '\0')) {
-                    if ((lpszDefault == nullptr) || (lpszDefault[0] == '\0'))
-                        Log()->Error(APP_LOG_EMERG, 0, ConfMsgEmpty, lpszSectionName, lpszKeyName, configFile.c_str(), Line);
-                } else {
-                    if ((lpszDefault == nullptr) || (lpszDefault[0] == '\0'))
-                        Log()->Error(APP_LOG_EMERG, 0, ConfMsgInvalidValue, lpszSectionName, lpszKeyName, lpszValue,
-                                     configFile.c_str(), Line);
-                    else
-                        Log()->Error(APP_LOG_EMERG, 0, ConfMsgInvalidValue _T(" - ignored and set by default: \"%s\""), lpszSectionName, lpszKeyName, lpszValue,
-                                     configFile.c_str(), Line, lpszDefault);
-                }
-            };
-
             m_Configs.Clear();
 
             if (FileExists(configFile.c_str())) {
-                CIniFile smtpFile(configFile.c_str());
-                smtpFile.OnIniFileParseError(OnIniFileParseError);
+                CIniFile IniFile(configFile.c_str());
+                IniFile.OnIniFileParseError(OnIniFileParseError);
 
                 CStringList Addresses;
-                smtpFile.ReadSections(&Addresses);
+                IniFile.ReadSections(&Addresses);
 
                 for (int i = 0; i < Addresses.Count(); i++) {
                     const auto& Address = Addresses[i];
                     int Index = m_Configs.AddPair(Address, CSMTPConfig());
                     auto& Config = m_Configs[Index].Value();
-                    InitConfig(smtpFile, Address, Config);
+                    InitConfig(IniFile, Address, Config);
                 }
 
                 auto& defaultConfig = m_Configs.Default();
                 if (defaultConfig.Name().IsEmpty()) {
                     defaultConfig.Name() = _T("default");
                     auto& Config = defaultConfig.Value();
-                    InitConfig(smtpFile, defaultConfig.Name(), Config);
+                    InitConfig(IniFile, defaultConfig.Name(), Config);
                 }
             } else {
                 Log()->Error(APP_LOG_EMERG, 0, APP_FILE_NOT_FOUND, configFile.c_str());
@@ -97,10 +81,10 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::InitConfig(const CIniFile &IniFile, const CString &Address, CSMTPConfig &Value) {
-            Value.Location() = IniFile.ReadString(Address, "host", "localhost:25");
-            Value.UserName() = IniFile.ReadString(Address, "username", "smtp");
-            Value.Password() = IniFile.ReadString(Address, "password", "smtp");
+        void CMessageServer::InitConfig(const CIniFile &IniFile, const CString &Profile, CSMTPConfig &Value) {
+            Value.Location() = IniFile.ReadString(Profile, "host", "localhost:25");
+            Value.UserName() = IniFile.ReadString(Profile, "username", "smtp");
+            Value.Password() = IniFile.ReadString(Profile, "password", "smtp");
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -316,7 +300,7 @@ namespace Apostol {
 
                     if (Messages.Count() > 0 ) {
 
-                        CString AddrFrom;
+                        CString Temp;
 
                         for (int Row = 0; Row < Messages.Count(); Row++) {
 
@@ -327,20 +311,23 @@ namespace Apostol {
                             if (m_ClientManager.InProgress(MsgId))
                                 continue;
 
-                            const auto &From = Record.Values("addressfrom");
+                            const auto &addressFrom = Record.Values("addressfrom");
+                            const auto &Profile = addressFrom.Find('@') == CString::npos ? addressFrom : "default";
+
+                            const auto &From = m_Configs[Profile].Value().UserName();
                             const auto &To = Record.Values("addressto");
 
-                            if (AddrFrom.IsEmpty())
-                                AddrFrom = From;
+                            if (Temp.IsEmpty())
+                                Temp = From;
 
-                            if (AddrFrom != From) {
-                                AddrFrom = From;
+                            if (Temp != From) {
+                                Temp = From;
                                 pSMTPClient->SendMail();
                                 pSMTPClient = nullptr;
                             }
 
                             if (pSMTPClient == nullptr) {
-                                pSMTPClient = GetSMTPClient(m_Configs[From].Value());
+                                pSMTPClient = GetSMTPClient(m_Configs[Profile].Value());
                             }
 
                             auto &LMessage = pSMTPClient->NewMessage();
