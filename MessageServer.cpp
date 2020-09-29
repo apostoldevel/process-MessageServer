@@ -348,12 +348,12 @@ namespace Apostol {
 
                             LMessage.Body().Add("From: " + From);
                             LMessage.Body().Add("To: " + To);
-                            LMessage.Body().Add("Subject: " + CSMTPMessage::encodingSubject(LMessage.Subject())); /* Non-ASCII Text, see RFC 1342 */
+                            LMessage.Body().Add("Subject: " + CSMTPMessage::EncodingSubject(LMessage.Subject())); /* Non-ASCII Text, see RFC 1342 */
                             LMessage.Body().Add("Content-Type: text/html; charset=UTF8");
                             LMessage.Body().Add("Content-Transfer-Encoding: BASE64");
                             LMessage.Body().Add(""); /* empty line to divide headers from body, see RFC 5322 */
 
-                            LMessage.Body() << base64_encode(Record.Values("body"));
+                            LMessage.Body() << CSMTPMessage::SplitMIME(base64_encode(Record.Values("body")));
 
 #if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
                             LMessage.OnDone([this](auto && Message) { DoDone(Message); });
