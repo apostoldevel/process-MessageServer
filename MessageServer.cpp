@@ -364,7 +364,8 @@ namespace Apostol {
 #endif
                         }
 
-                        pSMTPClient->SendMail();
+                        if (pSMTPClient != nullptr)
+                            pSMTPClient->SendMail();
                     }
                 } catch (Delphi::Exception::Exception &E) {
                     DoError(E);
