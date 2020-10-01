@@ -353,7 +353,7 @@ namespace Apostol {
                             LMessage.Body().Add("Content-Transfer-Encoding: BASE64");
                             LMessage.Body().Add(""); /* empty line to divide headers from body, see RFC 5322 */
 
-                            LMessage.Body() << CSMTPMessage::SplitMIME(base64_encode(Record.Values("body")));
+                            LMessage.Body() << CSMTPMessage::SplitText(base64_encode(Record.Values("body")));
 
 #if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
                             LMessage.OnDone([this](auto && Message) { DoDone(Message); });
