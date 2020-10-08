@@ -31,30 +31,6 @@ namespace Apostol {
 
     namespace Processes {
 
-        struct CAuth {
-            CString Username;
-            CString Password;
-
-            CString Agent;
-            CString Host;
-
-            CString Session;
-            CString Secret;
-            CString Code;
-
-            void Clear() {
-                Username.Clear();
-                Password.Clear();
-
-                Agent.Clear();
-                Host.Clear();
-
-                Session.Clear();
-                Secret.Clear();
-                Code.Clear();
-            }
-        };
-
         //--------------------------------------------------------------------------------------------------------------
 
         //-- CMessageServer --------------------------------------------------------------------------------------------
@@ -69,8 +45,6 @@ namespace Apostol {
 
         private:
 
-            CAuth m_Auth;
-
             CSMTPConfigs m_Configs;
 
             int m_HeartbeatInterval;
@@ -79,13 +53,15 @@ namespace Apostol {
 
             CSMTPManager m_ClientManager;
 
-            void InitServer();
             void CheckMessage();
 
             void BeforeRun() override;
             void AfterRun() override;
 
-            void AddAuthorize(CStringList &SQL) const;
+            static void AddAuthorize(CStringList &SQL);
+
+            static void AddMIME(const CString &MsgId, const CString &From, const CString &To, const CString &Subject,
+                                const CString &Body, CSMTPMessage &Message);
 
         protected:
 

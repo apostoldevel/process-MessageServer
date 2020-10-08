@@ -202,81 +202,35 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::AddAuthorize(CStringList &SQL) const {
-            SQL.Add(CString().Format("SELECT * FROM api.authorize(%s, %s, %s, %s);",
-                                     PQQuoteLiteral(m_Auth.Session).c_str(),
-                                     PQQuoteLiteral(m_Auth.Secret).c_str(),
-                                     PQQuoteLiteral(m_Auth.Agent).c_str(),
-                                     PQQuoteLiteral(m_Auth.Host).c_str()
-            ));
-
-            SQL.Add(CString().Format("SELECT * FROM api.su('mailbot', %s);",
-                                     PQQuoteLiteral(m_Auth.Password).c_str()
-            ));
+        void CMessageServer::AddAuthorize(CStringList &SQL) {
+            SQL.Add("SELECT * FROM api.set_session('mailbot', 'root');");
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::InitServer() {
+        void CMessageServer::AddMIME(const CString &MsgId, const CString &From, const CString &To, const CString &Subject,
+                                     const CString &Body, CSMTPMessage &Message) {
+            Message.MsgId() = MsgId;
+            Message.From() = From;
+            Message.To() = To;
+            Message.Subject() = Subject;
 
-            auto OnExecuted = [this](CPQPollQuery *APollQuery) {
+            Message.Body().Add("MIME-Version: 1.0" );
 
-                CPQResult *Result;
-                CStringList SQL;
-
-                try {
-                    for (int I = 0; I < APollQuery->Count(); I++) {
-                        Result = APollQuery->Results(I);
-
-                        if (Result->ExecStatus() != PGRES_TUPLES_OK)
-                            throw Delphi::Exception::EDBError(Result->GetErrorMessage());
-
-                        if (I == 0) {
-                            m_Auth.Session = Result->GetValue(0, 0);
-                            m_Auth.Secret = Result->GetValue(0, 1);
-                            m_Auth.Code = Result->GetValue(0, 2);
-
-                            m_CheckDate = Now();
-                        }
-                    }
-                } catch (Delphi::Exception::Exception &E) {
-                    DoError(E);
-                }
-            };
-
-            auto OnException = [this](CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
-                DoError(E);
-            };
-
-            const auto &ConnInfo = Config()->PostgresConnInfo()["helper"].Value();
-
-            m_Auth.Username = ConnInfo["user"];
-            m_Auth.Password = ConnInfo["password"];
-
-            m_Auth.Agent = "Message Server";
-            m_Auth.Host = CApostolModule::GetIPByHostName(CApostolModule::GetHostName());
-
-            if (m_Auth.Host.IsEmpty()) {
-                m_Auth.Host = _T("127.0.0.1");
+            CString LDate;
+            LDate.SetLength(64);
+            if (CHTTPReply::GetGMT(LDate.Data(), LDate.Size()) != nullptr) {
+                LDate.Truncate();
+                Message.Body().Add("Date: " + LDate);
             }
 
-            CStringList SQL;
+            Message.Body().Add("From: " + From);
+            Message.Body().Add("To: " + To);
+            Message.Body().Add("Subject: " + CSMTPMessage::EncodingSubject(Subject)); /* Non-ASCII Text, see RFC 1342 */
+            Message.Body().Add("Content-Type: text/html; charset=UTF8");
+            Message.Body().Add("Content-Transfer-Encoding: BASE64");
+            Message.Body().Add(""); /* empty line to divide headers from body, see RFC 5322 */
 
-            SQL.Add(CString().Format("SELECT * FROM api.login(%s, %s, %s, %s);",
-                    PQQuoteLiteral(m_Auth.Username).c_str(),
-                    PQQuoteLiteral(m_Auth.Password).c_str(),
-                    PQQuoteLiteral(m_Auth.Agent).c_str(),
-                    PQQuoteLiteral(m_Auth.Host).c_str()
-            ));
-
-            SQL.Add(CString().Format("SELECT * FROM api.su('mailbot', %s);",
-                    PQQuoteLiteral(m_Auth.Password).c_str()
-            ));
-
-            try {
-                ExecSQL(SQL, nullptr, OnExecuted, OnException);
-            } catch (Delphi::Exception::Exception &E) {
-                DoError(E);
-            }
+            Message.Body() << CSMTPMessage::SplitText(base64_encode(Body));
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -292,11 +246,7 @@ namespace Apostol {
                 try {
                     CApostolModule::QueryToResults(APollQuery, Result);
 
-                    const auto &Authenticate = Result[0];
-                    if (Authenticate[0].Values("authorized") != "t")
-                        throw Delphi::Exception::EDBError(Authenticate[0].Values("message").c_str());
-
-                    const auto &Messages = Result[2]; // Skip api.su
+                    const auto &Messages = Result[1]; // Skip api.set_session
 
                     if (Messages.Count() > 0 ) {
 
@@ -316,12 +266,14 @@ namespace Apostol {
 
                             const auto &From = m_Configs[Profile].Value().UserName();
                             const auto &To = Record.Values("addressto");
+                            const auto &Subject = Record.Values("subject");
+                            const auto &Body = Record.Values("body");
 
                             if (Temp.IsEmpty())
-                                Temp = From;
+                                Temp = addressFrom;
 
-                            if (Temp != From) {
-                                Temp = From;
+                            if (Temp != addressFrom) {
+                                Temp = addressFrom;
                                 pSMTPClient->SendMail();
                                 pSMTPClient = nullptr;
                             }
@@ -332,28 +284,7 @@ namespace Apostol {
 
                             auto &LMessage = pSMTPClient->NewMessage();
 
-                            LMessage.MsgId() = MsgId;
-                            LMessage.From() = From;
-                            LMessage.To() = To;
-                            LMessage.Subject() = Record.Values("subject");
-
-                            LMessage.Body().Add("MIME-Version: 1.0" );
-
-                            CString LDate;
-                            LDate.SetLength(64);
-                            if (CHTTPReply::GetGMT(LDate.Data(), LDate.Size()) != nullptr) {
-                                LDate.Truncate();
-                                LMessage.Body().Add("Date: " + LDate);
-                            }
-
-                            LMessage.Body().Add("From: " + From);
-                            LMessage.Body().Add("To: " + To);
-                            LMessage.Body().Add("Subject: " + CSMTPMessage::EncodingSubject(LMessage.Subject())); /* Non-ASCII Text, see RFC 1342 */
-                            LMessage.Body().Add("Content-Type: text/html; charset=UTF8");
-                            LMessage.Body().Add("Content-Transfer-Encoding: BASE64");
-                            LMessage.Body().Add(""); /* empty line to divide headers from body, see RFC 5322 */
-
-                            LMessage.Body() << CSMTPMessage::SplitText(base64_encode(Record.Values("body")));
+                            AddMIME(MsgId, From, To, Subject, Body, LMessage);
 
 #if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
                             LMessage.OnDone([this](auto && Message) { DoDone(Message); });
@@ -390,7 +321,6 @@ namespace Apostol {
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::DoError(const Delphi::Exception::Exception &E) {
-            m_Auth.Clear();
             m_CheckDate = Now() + (CDateTime) 30 / SecsPerDay;
             Log()->Error(APP_LOG_EMERG, 0, E.what());
         }
@@ -400,12 +330,7 @@ namespace Apostol {
             auto now = Now();
 
             if ((now >= m_CheckDate)) {
-                if (m_Auth.Session.IsEmpty()) {
-                    InitServer();
-                } else {
-                    CheckMessage();
-                }
-
+                CheckMessage();
                 m_CheckDate = now + (CDateTime) m_HeartbeatInterval / SecsPerDay;
 
                 m_ClientManager.CleanUp();
