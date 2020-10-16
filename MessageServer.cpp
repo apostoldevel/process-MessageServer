@@ -334,7 +334,7 @@ namespace Apostol {
             CStringList SQL;
 
             AddAuthorize(SQL);
-            SQL.Add("SELECT * FROM api.message('message.outbox', 'smtp', 'prepared') ORDER BY created LIMIT 10;");
+            SQL.Add("SELECT * FROM api.message('message.outbox', 'smtp.agent', 'prepared') ORDER BY created LIMIT 10;");
 
             try {
                 ExecSQL(SQL, nullptr, OnExecuted, OnException);
