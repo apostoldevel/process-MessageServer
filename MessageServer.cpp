@@ -207,6 +207,22 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
+        void CMessageServer::RunAction(CStringList &SQL, const CString &MsgId, const CString &Action) {
+            SQL.Add(CString().Format("SELECT * FROM api.run_action(%s, %s);",
+                                     MsgId.c_str(),
+                                     PQQuoteLiteral(Action).c_str()
+            ));
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CMessageServer::SetObjectLabel(CStringList &SQL, const CString &MsgId, const CString &Label) {
+            SQL.Add(CString().Format("SELECT * FROM api.set_object_label(%s, %s);",
+                                     MsgId.c_str(),
+                                     PQQuoteLiteral(Label).c_str()
+            ));
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
         void CMessageServer::AddMIME(const CString &MsgId, const CString &From, const CString &To, const CString &Subject,
                                      const CString &Body, CSMTPMessage &Message) {
             Message.MsgId() = MsgId;
@@ -262,7 +278,9 @@ namespace Apostol {
                                 continue;
 
                             const auto &addressFrom = Record.Values("addressfrom");
-                            const auto &Profile = addressFrom.Find('@') == CString::npos ? addressFrom : "default";
+
+                            const auto Pos = addressFrom.Find('@');
+                            const auto &Profile = Pos == CString::npos ? addressFrom : addressFrom.SubString(0, Pos);
 
                             const auto &From = m_Configs[Profile].Value().UserName();
                             const auto &To = Record.Values("addressto");
@@ -284,7 +302,13 @@ namespace Apostol {
 
                             auto &LMessage = pSMTPClient->NewMessage();
 
-                            AddMIME(MsgId, From, To, Subject, Body, LMessage);
+                            LMessage.MsgId() = MsgId;
+                            LMessage.From() = From;
+                            LMessage.To() = To;
+                            LMessage.Subject() = Subject;
+                            LMessage.Body() = Body;
+
+                            //AddMIME(MsgId, From, To, Subject, Body, LMessage);
 
 #if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
                             LMessage.OnDone([this](auto && Message) { DoDone(Message); });
@@ -356,15 +380,15 @@ namespace Apostol {
             CStringList SQL;
 
             AddAuthorize(SQL);
-            SQL.Add(CString().Format("SELECT * FROM api.run_action(%s, 'send');", Message.MsgId().c_str()));
+            RunAction(SQL, Message.MsgId(), "send");
+
+            Log()->Message("[%s] Message sending.", Message.MsgId().c_str());
 
             try {
                 ExecSQL(SQL);
             } catch (Delphi::Exception::Exception &E) {
                 DoError(E);
             }
-
-            Log()->Error(APP_LOG_NOTICE, 0, "[%s] Message sending.", Message.MsgId().c_str());
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -372,19 +396,16 @@ namespace Apostol {
             CStringList SQL;
 
             AddAuthorize(SQL);
-            SQL.Add(CString().Format("SELECT * FROM api.run_action(%s, 'cancel');", Message.MsgId().c_str()));
-            SQL.Add(CString().Format("SELECT * FROM api.set_object_label(%s, %s);",
-                                     Message.MsgId().c_str(),
-                                     PQQuoteLiteral(Error).c_str()
-            ));
+            RunAction(SQL, Message.MsgId(), "cancel");
+            SetObjectLabel(SQL, Message.MsgId(), Error);
+
+            Log()->Message("[%s] Sent message canceled.", Message.MsgId().c_str());
 
             try {
                 ExecSQL(SQL);
             } catch (Delphi::Exception::Exception &E) {
                 DoError(E);
             }
-
-            Log()->Error(APP_LOG_EMERG, 0, "[%s] Sent message canceled.", Message.MsgId().c_str());
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -392,19 +413,16 @@ namespace Apostol {
             CStringList SQL;
 
             AddAuthorize(SQL);
-            SQL.Add(CString().Format("SELECT * FROM api.run_action(%s, 'done');", Message.MsgId().c_str()));
-            SQL.Add(CString().Format("SELECT * FROM api.set_object_label(%s, %s);",
-                Message.MsgId().c_str(),
-                PQQuoteLiteral(Message.MessageId()).c_str()
-            ));
+            RunAction(SQL, Message.MsgId(), "done");
+            SetObjectLabel(SQL, Message.MsgId(), Message.MessageId());
+
+            Log()->Message("[%s] Message sent successfully.", Message.MsgId().c_str());
 
             try {
                 ExecSQL(SQL);
             } catch (Delphi::Exception::Exception &E) {
                 DoError(E);
             }
-
-            Log()->Error(APP_LOG_NOTICE, 0, "[%s] Message sent successfully.", Message.MsgId().c_str());
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -412,19 +430,16 @@ namespace Apostol {
             CStringList SQL;
 
             AddAuthorize(SQL);
-            SQL.Add(CString().Format("SELECT * FROM api.run_action(%s, 'fail');", Message.MsgId().c_str()));
-            SQL.Add(CString().Format("SELECT * FROM api.set_object_label(%s, %s);",
-                Message.MsgId().c_str(),
-                PQQuoteLiteral(Error).c_str()
-            ));
+            RunAction(SQL, Message.MsgId(), "fail");
+            SetObjectLabel(SQL, Message.MsgId(), Error);
+
+            Log()->Message("[%s] Message was not sent.", Message.MsgId().c_str());
 
             try {
                 ExecSQL(SQL);
             } catch (Delphi::Exception::Exception &E) {
                 DoError(E);
             }
-
-            Log()->Error(APP_LOG_EMERG, 0, "[%s] Message was not sent.", Message.MsgId().c_str());
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -481,10 +496,7 @@ namespace Apostol {
             AddAuthorize(SQL);
             for (int i = 0; i < LClient->Messages().Count(); ++i) {
                 const auto& Message = LClient->Messages()[i];
-                SQL.Add(CString().Format("SELECT * FROM api.set_object_label(%s, %s);",
-                                         Message.MsgId().c_str(),
-                                         PQQuoteLiteral(E.what()).c_str()
-                ));
+                SetObjectLabel(SQL, Message.MsgId(), E.what());
             }
 
             m_CheckDate = Now() + (CDateTime) 10 / SecsPerDay;

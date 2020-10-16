@@ -59,6 +59,8 @@ namespace Apostol {
             void AfterRun() override;
 
             static void AddAuthorize(CStringList &SQL);
+            static void RunAction(CStringList &SQL, const CString &MsgId, const CString &Action);
+            static void SetObjectLabel(CStringList &SQL, const CString &MsgId, const CString &Label);
 
             static void AddMIME(const CString &MsgId, const CString &From, const CString &To, const CString &Subject,
                                 const CString &Body, CSMTPMessage &Message);
