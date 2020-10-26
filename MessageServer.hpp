@@ -45,15 +45,33 @@ namespace Apostol {
 
         private:
 
+            CProviders m_Providers;
+
             CSMTPConfigs m_Configs;
 
             int m_HeartbeatInterval;
 
+            CDateTime m_FixedDate;
             CDateTime m_CheckDate;
 
-            CSMTPManager m_ClientManager;
+            CSMTPManager m_MailManager;
+
+            CString m_ServiceToken;
+            CString m_AccessToken;
+
+            void FetchCerts(CProvider &Provider);
+
+            void FetchAccessToken(const CProvider& Provider);
+
+            void FetchProviders();
+            void CheckProviders();
 
             void CheckMessage();
+
+            void SendSMTP(const CPQueryResult &Messages);
+            void SendFCM(const CPQueryResult &Messages);
+
+            CString CreateServiceToken(const CProvider& Provider, const CString &Application);
 
             void BeforeRun() override;
             void AfterRun() override;
@@ -62,9 +80,6 @@ namespace Apostol {
             static void RunAction(CStringList &SQL, const CString &MsgId, const CString &Action);
             static void SetObjectLabel(CStringList &SQL, const CString &MsgId, const CString &Label);
 
-            static void AddMIME(const CString &MsgId, const CString &From, const CString &To, const CString &Subject,
-                                const CString &Body, CSMTPMessage &Message);
-
         protected:
 
             void DoTimer(CPollEventHandler *AHandler) override;
@@ -72,17 +87,20 @@ namespace Apostol {
             void DoHeartbeat();
             void DoError(const Delphi::Exception::Exception &E);
 
-            void DoSend(const CSMTPMessage &Message);
-            void DoDone(const CSMTPMessage &Message);
+            void DoSend(const CMessage &Message);
+            void DoDone(const CMessage &Message);
 
-            void DoCancel(const CSMTPMessage &Message, const CString &Error);
-            void DoFail(const CSMTPMessage &Message, const CString &Error);
+            void DoCancel(const CMessage &Message, const CString &Error);
+            void DoFail(const CMessage &Message, const CString &Error);
 
             void DoRequest(CObject *Sender);
             void DoReply(CObject *Sender);
 
-            void DoConnected(CObject *Sender);
-            void DoDisconnected(CObject *Sender);
+            void DoSMTPConnected(CObject *Sender);
+            void DoSMTPDisconnected(CObject *Sender);
+
+            void DoFCMConnected(CObject *Sender);
+            void DoFCMDisconnected(CObject *Sender);
 
             void DoException(CTCPConnection *AConnection, const Delphi::Exception::Exception &E);
             bool DoExecute(CTCPConnection *AConnection) override;
