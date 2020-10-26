@@ -500,8 +500,12 @@ namespace Apostol {
 
                     const CJSON Json(LReply->Content);
 
-                    pMessage->MessageId() = Json["name"].AsString();
-                    pMessage->Done();
+                    if (Json.HasOwnProperty("error")) {
+                        pMessage->Fail(Json["error"]["message"].AsString());
+                    } else {
+                        pMessage->MessageId() = Json["name"].AsString();
+                        pMessage->Done();
+                    }
                 }
 
                 return true;
