@@ -59,6 +59,8 @@ namespace Apostol {
             CString m_ServiceToken;
             CString m_AccessToken;
 
+            TPairs<CStringList> m_Profiles;
+
             void FetchCerts(CProvider &Provider);
 
             void FetchAccessToken(const CProvider& Provider);
@@ -70,15 +72,19 @@ namespace Apostol {
 
             void SendSMTP(const CPQueryResult &Messages);
             void SendFCM(const CPQueryResult &Messages);
+            void SendSBA(const CPQueryResult &Messages);
 
             CString CreateServiceToken(const CProvider& Provider, const CString &Application);
 
             void BeforeRun() override;
             void AfterRun() override;
 
-            static void AddAuthorize(CStringList &SQL);
+            bool InProgress(const CString &MsgId);
+
+            static void AddAuthorize(CStringList &SQL, const CString& Username = "mailbot", const CString& Area = "root");
             static void RunAction(CStringList &SQL, const CString &MsgId, const CString &Action);
             static void SetObjectLabel(CStringList &SQL, const CString &MsgId, const CString &Label);
+            static void RunAPI(CStringList &SQL, const CString &Path, const CJSON &Payload);
 
         protected:
 
@@ -99,8 +105,8 @@ namespace Apostol {
             void DoSMTPConnected(CObject *Sender);
             void DoSMTPDisconnected(CObject *Sender);
 
-            void DoFCMConnected(CObject *Sender);
-            void DoFCMDisconnected(CObject *Sender);
+            void DoAPIConnected(CObject *Sender);
+            void DoAPIDisconnected(CObject *Sender);
 
             void DoException(CTCPConnection *AConnection, const Delphi::Exception::Exception &E);
             bool DoExecute(CTCPConnection *AConnection) override;
@@ -121,7 +127,9 @@ namespace Apostol {
             void Run() override;
 
             void LoadSMTPConfig(const CString &FileName);
-            static void InitConfig(const CIniFile &IniFile, const CString &Section, CSMTPConfig &Config);
+
+            static void InitSMTPConfig(const CIniFile &IniFile, const CString &Section, CSMTPConfig &Config);
+            static void InitSBAConfig(const CIniFile &IniFile, const CString &Profile, CStringList &Config);
 
             CSMTPClient *GetSMTPClient(const CSMTPConfig &Config);
 

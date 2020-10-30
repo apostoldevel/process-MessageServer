@@ -74,14 +74,14 @@ namespace Apostol {
                     const auto& Section = Sections[i];
                     int Index = m_Configs.AddPair(Section, CSMTPConfig());
                     auto& Config = m_Configs[Index].Value();
-                    InitConfig(IniFile, Section, Config);
+                    InitSMTPConfig(IniFile, Section, Config);
                 }
 
                 auto& defaultConfig = m_Configs.Default();
                 if (defaultConfig.Name().IsEmpty()) {
                     defaultConfig.Name() = _T("default");
                     auto& Config = defaultConfig.Value();
-                    InitConfig(IniFile, defaultConfig.Name(), Config);
+                    InitSMTPConfig(IniFile, defaultConfig.Name(), Config);
                 }
             } else {
                 Log()->Error(APP_LOG_EMERG, 0, APP_FILE_NOT_FOUND, ConfigFile.c_str());
@@ -89,10 +89,17 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::InitConfig(const CIniFile &IniFile, const CString &Section, CSMTPConfig &Config) {
+        void CMessageServer::InitSMTPConfig(const CIniFile &IniFile, const CString &Section, CSMTPConfig &Config) {
             Config.Location() = IniFile.ReadString(Section, "host", "localhost:25");
             Config.UserName() = IniFile.ReadString(Section, "username", "smtp");
             Config.Password() = IniFile.ReadString(Section, "password", "smtp");
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CMessageServer::InitSBAConfig(const CIniFile &IniFile, const CString &Profile, CStringList &Config) {
+            Config.AddPair("uri", IniFile.ReadString(Profile, "uri", Profile == "test" ? "https://3dsec.sberbank.ru" : "https://securepayments.sberbank.ru"));
+            Config.AddPair("username", IniFile.ReadString(Profile, "username", ""));
+            Config.AddPair("password", IniFile.ReadString(Profile, "password", ""));
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -146,6 +153,7 @@ namespace Apostol {
             Config()->Reload();
 
             LoadSMTPConfig(Config()->IniFile().ReadString("process/MessageServer", "smtp", "conf/smtp.conf"));
+            LoadConfig(Config()->IniFile().ReadString("worker/sba", "config", "conf/sba.conf"), m_Profiles, InitSBAConfig);
 
             LoadProviders(m_Providers);
 
@@ -211,8 +219,8 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::AddAuthorize(CStringList &SQL) {
-            SQL.Add("SELECT * FROM api.set_session('mailbot', 'root');");
+        void CMessageServer::AddAuthorize(CStringList &SQL, const CString& Username, const CString& Area) {
+            SQL.Add(CString().Format("SELECT * FROM api.set_session('%s', '%s');", Username.c_str(), Area.c_str()));
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -228,6 +236,17 @@ namespace Apostol {
             SQL.Add(CString().Format("SELECT * FROM api.set_object_label(%s, %s);",
                                      MsgId.c_str(),
                                      PQQuoteLiteral(Label).c_str()
+            ));
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CMessageServer::RunAPI(CStringList &SQL, const CString &Path, const CJSON &Payload) {
+            const auto &payload = Payload.IsNull() ? "null" : PQQuoteLiteral(Payload.ToString());
+            SQL.Add(CString()
+                .MaxFormatSize(256 + Path.Size() + payload.Size())
+                .Format("SELECT * FROM rest.api('%s', %s::jsonb);",
+                                    Path.c_str(),
+                                    payload.c_str()
             ));
         }
         //--------------------------------------------------------------------------------------------------------------
@@ -257,31 +276,31 @@ namespace Apostol {
 
         void CMessageServer::FetchAccessToken(const CProvider &Provider) {
 
-            auto OnRequestToken = [](CHTTPClient *Sender, CHTTPRequest *Request) {
+            auto OnRequestToken = [](CHTTPClient *Sender, CHTTPRequest *ARequest) {
 
                 const auto &token_uri = Sender->Data()["token_uri"];
                 const auto &grant_type = Sender->Data()["grant_type"];
                 const auto &assertion = Sender->Data()["assertion"];
 
-                Request->Content = _T("grant_type=");
-                Request->Content << CHTTPServer::URLEncode(grant_type);
+                ARequest->Content = _T("grant_type=");
+                ARequest->Content << CHTTPServer::URLEncode(grant_type);
 
-                Request->Content << _T("&assertion=");
-                Request->Content << CHTTPServer::URLEncode(assertion);
+                ARequest->Content << _T("&assertion=");
+                ARequest->Content << CHTTPServer::URLEncode(assertion);
 
-                CHTTPRequest::Prepare(Request, _T("POST"), token_uri.c_str(), _T("application/x-www-form-urlencoded"));
+                CHTTPRequest::Prepare(ARequest, _T("POST"), token_uri.c_str(), _T("application/x-www-form-urlencoded"));
 
-                DebugRequest(Request);
+                DebugRequest(ARequest);
             };
 
             auto OnReplyToken = [this](CTCPConnection *Sender) {
 
-                auto LConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
-                auto LReply = LConnection->Reply();
+                auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
+                auto pReply = pConnection->Reply();
 
-                DebugReply(LReply);
+                DebugReply(pReply);
 
-                const CJSON Json(LReply->Content);
+                const CJSON Json(pReply->Content);
 
                 m_AccessToken = Json["access_token"].AsString();
 
@@ -290,12 +309,12 @@ namespace Apostol {
 
             auto OnException = [](CTCPConnection *Sender, const Delphi::Exception::Exception &E) {
 
-                auto LConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
-                auto LClient = dynamic_cast<CHTTPClient *> (LConnection->Client());
+                auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
+                auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
 
-                DebugReply(LConnection->Reply());
+                DebugReply(pConnection->Reply());
 
-                Log()->Error(APP_LOG_EMERG, 0, "[%s:%d] %s", LClient->Host().c_str(), LClient->Port(), E.what());
+                Log()->Error(APP_LOG_EMERG, 0, "[%s:%d] %s", pClient->Host().c_str(), pClient->Port(), E.what());
             };
 
             CLocation URI("https://oauth2.googleapis.com/token");
@@ -325,27 +344,28 @@ namespace Apostol {
 
             Log()->Error(APP_LOG_INFO, 0, _T("Trying to fetch public keys from: %s"), URI.c_str());
 
-            auto OnRequest = [&Provider](CHTTPClient *Sender, CHTTPRequest *Request) {
+            auto OnRequest = [&Provider](CHTTPClient *Sender, CHTTPRequest *ARequest) {
                 const auto& client_x509_cert_url = std::string(Provider.Params[PROVIDER_APPLICATION_NAME]["client_x509_cert_url"].AsString());
 
                 Provider.KeyStatusTime = Now();
                 Provider.KeyStatus = CProvider::ksFetching;
+
                 CLocation Location(client_x509_cert_url);
-                CHTTPRequest::Prepare(Request, "GET", Location.pathname.c_str());
+                CHTTPRequest::Prepare(ARequest, "GET", Location.pathname.c_str());
             };
 
             auto OnExecute = [this, &Provider](CTCPConnection *AConnection) {
-                auto LConnection = dynamic_cast<CHTTPClientConnection *> (AConnection);
-                auto LReply = LConnection->Reply();
+                auto pConnection = dynamic_cast<CHTTPClientConnection *> (AConnection);
+                auto pReply = pConnection->Reply();
 
                 try {
-                    DebugRequest(LConnection->Request());
-                    DebugReply(LReply);
+                    DebugRequest(pConnection->Request());
+                    DebugReply(pReply);
 
                     Provider.KeyStatusTime = Now();
 
                     Provider.Keys.Clear();
-                    Provider.Keys << LReply->Content;
+                    Provider.Keys << pReply->Content;
 
                     Provider.KeyStatus = CProvider::ksSuccess;
 
@@ -357,28 +377,28 @@ namespace Apostol {
                     Log()->Error(APP_LOG_EMERG, 0, "[Certificate] Message: %s", E.what());
                 }
 
-                LConnection->CloseConnection(true);
+                pConnection->CloseConnection(true);
                 return true;
             };
 
             auto OnException = [&Provider](CTCPConnection *AConnection, const Delphi::Exception::Exception &E) {
-                auto LConnection = dynamic_cast<CHTTPClientConnection *> (AConnection);
-                auto LClient = dynamic_cast<CHTTPClient *> (LConnection->Client());
+                auto pConnection = dynamic_cast<CHTTPClientConnection *> (AConnection);
+                auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
 
                 Provider.KeyStatusTime = Now();
                 Provider.KeyStatus = CProvider::ksFailed;
 
-                Log()->Error(APP_LOG_EMERG, 0, "[%s:%d] %s", LClient->Host().c_str(), LClient->Port(), E.what());
+                Log()->Error(APP_LOG_EMERG, 0, "[%s:%d] %s", pClient->Host().c_str(), pClient->Port(), E.what());
             };
 
             CLocation Location(URI);
-            auto LClient = GetClient(Location.hostname, Location.port);
+            auto pClient = GetClient(Location.hostname, Location.port);
 
-            LClient->OnRequest(OnRequest);
-            LClient->OnExecute(OnExecute);
-            LClient->OnException(OnException);
+            pClient->OnRequest(OnRequest);
+            pClient->OnExecute(OnExecute);
+            pClient->OnException(OnException);
 
-            LClient->Active(true);
+            pClient->Active(true);
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -420,21 +440,21 @@ namespace Apostol {
                     if (m_MailManager.InProgress(MsgId))
                         continue;
 
-                    const auto &addressFrom = Record.Values("addressfrom");
+                    const auto &profile = Record.Values("profile");
 
-                    const auto pos = addressFrom.Find('@');
-                    const auto &Profile = pos == CString::npos ? addressFrom : addressFrom.SubString(0, pos);
+                    const auto pos = profile.Find('@');
+                    const auto &Profile = pos == CString::npos ? profile : profile.SubString(0, pos);
 
                     const auto &From = m_Configs[Profile].Value().UserName();
-                    const auto &To = Record.Values("addressto");
+                    const auto &To = Record.Values("address");
                     const auto &Subject = Record.Values("subject");
-                    const auto &Body = Record.Values("body");
+                    const auto &Body = Record.Values("content");
 
                     if (Temp.IsEmpty())
-                        Temp = addressFrom;
+                        Temp = profile;
 
-                    if (Temp != addressFrom) {
-                        Temp = addressFrom;
+                    if (Temp != profile) {
+                        Temp = profile;
                         pSMTPClient->SendMail();
                         pSMTPClient = nullptr;
                     }
@@ -466,39 +486,49 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
+        bool CMessageServer::InProgress(const CString &MsgId) {
+            for (int i = 0; i < m_ClientManager.Count(); ++i) {
+                auto pClient = m_ClientManager[i];
+                auto pMessage = dynamic_cast<CMessage *> (pClient->Data().Objects("message"));
+                if (pMessage != nullptr) {
+                    if (pMessage->MsgId() == MsgId)
+                        return true;
+                }
+            }
+            return false;
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
         void CMessageServer::SendFCM(const CPQueryResult &Messages) {
 
-            auto OnRequestToken = [this](CHTTPClient *Sender, CHTTPRequest *Request) {
+            auto OnRequest = [this](CHTTPClient *Sender, CHTTPRequest *ARequest) {
 
                 const auto &uri = Sender->Data()["uri"];
 
-                int Index = Sender->Data().IndexOfName("message");
-                if (Index != -1) {
-                    auto pMessage = dynamic_cast<CMessage *> (Sender->Data().Objects(Index));
-                    Request->Content = pMessage->Content();
+                auto pMessage = dynamic_cast<CMessage *> (Sender->Data().Objects("message"));
+                if (pMessage != nullptr) {
+                    ARequest->Content = pMessage->Content();
                 }
 
-                CHTTPRequest::Prepare(Request, _T("POST"), uri.c_str(), _T("application/json"));
+                CHTTPRequest::Prepare(ARequest, _T("POST"), uri.c_str(), _T("application/json"));
 
-                Request->AddHeader("Authorization", CString().Format("Bearer %s", m_AccessToken.c_str()).c_str());
+                ARequest->AddHeader("Authorization", CString().Format("Bearer %s", m_AccessToken.c_str()).c_str());
 
-                DebugRequest(Request);
+                DebugRequest(ARequest);
             };
 
-            auto OnReplyToken = [](CTCPConnection *Sender) {
+            auto OnExecute = [](CTCPConnection *Sender) {
 
-                auto LConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
-                auto LClient = dynamic_cast<CHTTPClient *> (LConnection->Client());
+                auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
+                auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
 
-                auto LReply = LConnection->Reply();
+                auto pReply = pConnection->Reply();
 
-                DebugReply(LReply);
+                DebugReply(pReply);
 
-                int Index = LClient->Data().IndexOfName("message");
-                if (Index != -1) {
-                    auto pMessage = dynamic_cast<CMessage *> (LClient->Data().Objects(Index));
-
-                    const CJSON Json(LReply->Content);
+                auto pMessage = dynamic_cast<CMessage *> (pClient->Data().Objects("message"));
+                if (pMessage != nullptr) {
+                    const CJSON Json(pReply->Content);
 
                     if (Json.HasOwnProperty("error")) {
                         pMessage->Fail(Json["error"]["message"].AsString());
@@ -513,18 +543,17 @@ namespace Apostol {
 
             auto OnException = [](CTCPConnection *Sender, const Delphi::Exception::Exception &E) {
 
-                auto LConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
-                auto LClient = dynamic_cast<CHTTPClient *> (LConnection->Client());
+                auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
+                auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
 
-                int Index = LClient->Data().IndexOfName("message");
-                if (Index != -1) {
-                    auto pMessage = dynamic_cast<CMessage *> (LClient->Data().Objects(Index));
+                auto pMessage = dynamic_cast<CMessage *> (pClient->Data().Objects("message"));
+                if (pMessage != nullptr) {
                     pMessage->Fail(E.what());
                 }
 
-                DebugReply(LConnection->Reply());
+                DebugReply(pConnection->Reply());
 
-                Log()->Error(APP_LOG_EMERG, 0, "[%s:%d] %s", LClient->Host().c_str(), LClient->Port(), E.what());
+                Log()->Error(APP_LOG_EMERG, 0, "[%s:%d] %s", pClient->Host().c_str(), pClient->Port(), E.what());
             };
 
             if (m_AccessToken.IsEmpty())
@@ -538,23 +567,21 @@ namespace Apostol {
 
                     const auto &MsgId = Record.Values("id");
 
-                    if (m_MailManager.InProgress(MsgId))
+                    if (InProgress(MsgId))
                         continue;
 
-                    const auto &From = Record.Values("addressfrom");
-                    const auto &To = Record.Values("addressto");
+                    const auto &Profile = Record.Values("profile");
+                    const auto &Address = Record.Values("address");
                     const auto &Subject = Record.Values("subject");
-                    const auto &Body = Record.Values("body");
+                    const auto &Content = Record.Values("content");
 
                     auto pMessage = new CMessage();
 
-                    pMessage->Body().LineBreak(_T("\n"));
-
                     pMessage->MsgId() = MsgId;
-                    pMessage->From() = From;
-                    pMessage->To() = To;
+                    pMessage->From() = Profile;
+                    pMessage->To() = Address;
                     pMessage->Subject() = Subject;
-                    pMessage->Content() = Body;
+                    pMessage->Content() = Content;
 
 #if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
                     pMessage->OnDone([this](auto &&Message) { DoDone(Message); });
@@ -563,7 +590,7 @@ namespace Apostol {
                     pMessage->OnDone(std::bind(&CMessageServer::DoDone, this, _1));
                     pMessage->OnFail(std::bind(&CMessageServer::DoFail, this, _1, _2));
 #endif
-                    CLocation URI(CString().Format("https://fcm.googleapis.com/v1/projects/%s/messages:send", From.c_str()));
+                    CLocation URI(CString().Format("https://fcm.googleapis.com/v1/projects/%s/messages:send", Profile.c_str()));
 
                     auto pClient = GetClient(URI.hostname, URI.port);
 
@@ -571,13 +598,173 @@ namespace Apostol {
 
                     pClient->Data().AddObject("message", pMessage);
 
-                    pClient->OnRequest(OnRequestToken);
-                    pClient->OnExecute(OnReplyToken);
+                    pClient->OnRequest(OnRequest);
+                    pClient->OnExecute(OnExecute);
                     pClient->OnException(OnException);
 
 #if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
-                    pClient->OnConnected([this](auto &&Sender) { DoFCMConnected(Sender); });
-                    pClient->OnDisconnected([this](auto &&Sender) { DoFCMDisconnected(Sender); });
+                    pClient->OnConnected([this](auto &&Sender) { DoAPIConnected(Sender); });
+                    pClient->OnDisconnected([this](auto &&Sender) { DoAPIDisconnected(Sender); });
+#else
+                    pClient->OnConnected(std::bind(&CMessageServer::DoFCMConnected, this, _1));
+                    pClient->OnDisconnected(std::bind(&CMessageServer::DoFCMDisconnected, this, _1));
+#endif
+                    pClient->Active(true);
+                }
+            }
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CMessageServer::SendSBA(const CPQueryResult &Messages) {
+
+            auto OnRequest = [](CHTTPClient *Sender, CHTTPRequest *ARequest) {
+
+                const auto &uri = Sender->Data()["uri"];
+                const auto &username = Sender->Data()["username"];
+                const auto &password = Sender->Data()["password"];
+
+                auto pMessage = dynamic_cast<CMessage *> (Sender->Data().Objects("message"));
+                if (pMessage != nullptr) {
+                    CStringList DataForm;
+
+                    DataForm.LineBreak("&");
+                    DataForm.Delimiter('&');
+
+                    DataForm = pMessage->Content();
+
+                    DataForm.AddPair("userName", username);
+                    DataForm.AddPair("password", password);
+
+                    for (int i = 0; i < DataForm.Count(); ++i) {
+                        const auto& name = DataForm.Names(i);
+                        const auto& value = DataForm.ValueFromIndex(i);
+                        DataForm.Values(name, CHTTPServer::URLEncode(value));
+                    }
+
+                    ARequest->Content = DataForm.Text();
+                }
+
+                CHTTPRequest::Prepare(ARequest, _T("POST"), uri.c_str(), _T("application/x-www-form-urlencoded"));
+
+                DebugRequest(ARequest);
+            };
+
+            auto OnExecute = [this](CTCPConnection *Sender) {
+
+                auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
+                auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
+
+                auto pReply = pConnection->Reply();
+
+                DebugReply(pReply);
+
+                auto pMessage = dynamic_cast<CMessage *> (pClient->Data().Objects("message"));
+                if (pMessage != nullptr) {
+                    const auto& Json = CJSON(pReply->Content);
+
+                    const auto& Agent = pClient->Data()["agent"];
+                    const auto& Area = pClient->Data()["area"];
+
+                    CStringList SQL;
+
+                    AddAuthorize(SQL, "apibot", Area);
+
+                    CJSON Message;
+
+                    Message.Object().AddPair("parent", pMessage->MsgId());
+                    Message.Object().AddPair("type", "message.inbox");
+                    Message.Object().AddPair("agent", Agent);
+                    Message.Object().AddPair("profile", pMessage->From());
+                    Message.Object().AddPair("address", pMessage->To().First());
+                    Message.Object().AddPair("subject", pMessage->Subject());
+                    Message.Object().AddPair("content", Json.ToString());
+
+                    RunAPI(SQL, "/message/set", Message);
+
+                    try {
+                        ExecSQL(SQL);
+                        pMessage->Done();
+                    } catch (Delphi::Exception::Exception &E) {
+                        DoError(E);
+                    }
+                }
+
+                return true;
+            };
+
+            auto OnException = [](CTCPConnection *Sender, const Delphi::Exception::Exception &E) {
+
+                auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
+                auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
+
+                auto pMessage = dynamic_cast<CMessage *> (pClient->Data().Objects("message"));
+                if (pMessage != nullptr) {
+                    pMessage->Fail(E.what());
+                }
+
+                DebugReply(pConnection->Reply());
+
+                Log()->Error(APP_LOG_EMERG, 0, "[%s:%d] %s", pClient->Host().c_str(), pClient->Port(), E.what());
+            };
+
+            if (Messages.Count() > 0 ) {
+
+                for (int Row = 0; Row < Messages.Count(); Row++) {
+
+                    const auto &Record = Messages[Row];
+
+                    const auto &MsgId = Record.Values("id");
+
+                    if (InProgress(MsgId))
+                        continue;
+
+                    const auto &Agent = Record.Values("agentcode");
+                    const auto &Area = Record.Values("areacode");
+
+                    const auto &Profile = Record.Values("profile");
+                    const auto &Address = Record.Values("address");
+                    const auto &Subject = Record.Values("subject");
+                    const auto &Content = Record.Values("content");
+
+                    auto pMessage = new CMessage();
+
+                    pMessage->MsgId() = MsgId;
+                    pMessage->From() = Profile;
+                    pMessage->To() = Address;
+                    pMessage->Subject() = Subject;
+                    pMessage->Content() = Content;
+
+#if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
+                    pMessage->OnDone([this](auto &&Message) { DoDone(Message); });
+                    pMessage->OnFail([this](auto &&Message, auto &&Error) { DoFail(Message, Error); });
+#else
+                    pMessage->OnDone(std::bind(&CMessageServer::DoDone, this, _1));
+                    pMessage->OnFail(std::bind(&CMessageServer::DoFail, this, _1, _2));
+#endif
+                    const auto& uri = m_Profiles[Profile].Value()["uri"] + (Address.front() == '/' ? Address : '/' + Address);
+                    const auto& userName = m_Profiles[Profile].Value()["username"];
+                    const auto& password = m_Profiles[Profile].Value()["password"];
+
+                    CLocation URI(uri);
+
+                    auto pClient = GetClient(URI.hostname, URI.port);
+
+                    pClient->Data().Values("uri", URI.pathname);
+                    pClient->Data().Values("username", userName);
+                    pClient->Data().Values("password", password);
+
+                    pClient->Data().Values("agent", Agent);
+                    pClient->Data().Values("area", Area);
+
+                    pClient->Data().AddObject("message", pMessage);
+
+                    pClient->OnRequest(OnRequest);
+                    pClient->OnExecute(OnExecute);
+                    pClient->OnException(OnException);
+
+#if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
+                    pClient->OnConnected([this](auto &&Sender) { DoAPIConnected(Sender); });
+                    pClient->OnDisconnected([this](auto &&Sender) { DoAPIDisconnected(Sender); });
 #else
                     pClient->OnConnected(std::bind(&CMessageServer::DoFCMConnected, this, _1));
                     pClient->OnDisconnected(std::bind(&CMessageServer::DoFCMDisconnected, this, _1));
@@ -600,6 +787,7 @@ namespace Apostol {
                     // Skip Result[0] - api.set_session
                     SendSMTP(Result[1]);
                     SendFCM(Result[2]);
+                    SendSBA(Result[3]);
                 } catch (Delphi::Exception::Exception &E) {
                     DoError(E);
                 }
@@ -615,6 +803,7 @@ namespace Apostol {
 
             SQL.Add("SELECT * FROM api.message('message.outbox', 'smtp.agent', 'prepared') ORDER BY created LIMIT 10;");
             SQL.Add("SELECT * FROM api.message('message.outbox', 'fcm.agent', 'prepared') ORDER BY created LIMIT 10;");
+            SQL.Add("SELECT * FROM api.message('message.outbox', 'sba.agent', 'prepared') ORDER BY created LIMIT 10;");
 
             try {
                 ExecSQL(SQL, nullptr, OnExecuted, OnException);
@@ -654,8 +843,8 @@ namespace Apostol {
         void CMessageServer::DoTimer(CPollEventHandler *AHandler) {
             uint64_t exp;
 
-            auto LTimer = dynamic_cast<CEPollTimer *> (AHandler->Binding());
-            LTimer->Read(&exp, sizeof(uint64_t));
+            auto pTimer = dynamic_cast<CEPollTimer *> (AHandler->Binding());
+            pTimer->Read(&exp, sizeof(uint64_t));
 
             try {
                 DoHeartbeat();
@@ -734,24 +923,24 @@ namespace Apostol {
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::DoSMTPConnected(CObject *Sender) {
-            auto LConnection = dynamic_cast<CSMTPConnection *>(Sender);
-            if (LConnection != nullptr) {
-                auto LClient = dynamic_cast<CSMTPClient *> (LConnection->Client());
-                for (int i = 0; i < LClient->Messages().Count(); ++i)
-                    DoSend(LClient->Messages()[i]);
+            auto pConnection = dynamic_cast<CSMTPConnection *>(Sender);
+            if (pConnection != nullptr) {
+                auto pClient = dynamic_cast<CSMTPClient *> (pConnection->Client());
+                for (int i = 0; i < pClient->Messages().Count(); ++i)
+                    DoSend(pClient->Messages()[i]);
 
-                Log()->Message(_T("[%s:%d] SMTP client connected."), LConnection->Socket()->Binding()->PeerIP(),
-                               LConnection->Socket()->Binding()->PeerPort());
+                Log()->Message(_T("[%s:%d] SMTP client connected."), pConnection->Socket()->Binding()->PeerIP(),
+                               pConnection->Socket()->Binding()->PeerPort());
             }
         }
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::DoSMTPDisconnected(CObject *Sender) {
-            auto LConnection = dynamic_cast<CSMTPConnection *>(Sender);
-            if (LConnection != nullptr) {
-                if (!LConnection->ClosedGracefully()) {
-                    Log()->Message(_T("[%s:%d] FCM client disconnected."), LConnection->Socket()->Binding()->PeerIP(),
-                                   LConnection->Socket()->Binding()->PeerPort());
+            auto pConnection = dynamic_cast<CSMTPConnection *>(Sender);
+            if (pConnection != nullptr) {
+                if (!pConnection->ClosedGracefully()) {
+                    Log()->Message(_T("[%s:%d] FCM client disconnected."), pConnection->Socket()->Binding()->PeerIP(),
+                                   pConnection->Socket()->Binding()->PeerPort());
                 } else {
                     Log()->Message(_T("FCM client disconnected."));
                 }
@@ -759,37 +948,44 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::DoFCMConnected(CObject *Sender) {
-            auto LConnection = dynamic_cast<CHTTPClientConnection *>(Sender);
-            if (LConnection != nullptr) {
-                auto LClient = dynamic_cast<CHTTPClient *> (LConnection->Client());
-                int Index = LClient->Data().IndexOfName("message");
-                if (Index != -1) {
-                    auto pMessage = dynamic_cast<CMessage *> (LClient->Data().Objects(Index));
-                    DoSend(*pMessage);
+        void CMessageServer::DoAPIConnected(CObject *Sender) {
+            auto pConnection = dynamic_cast<CHTTPClientConnection *>(Sender);
+            if (Assigned(pConnection)) {
+                auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
+                if (Assigned(pClient)) {
+                    auto pMessage = dynamic_cast<CMessage *> (pClient->Data().Objects("message"));
+                    if (Assigned(pMessage)) {
+                        DoSend(*pMessage);
+                    }
                 }
-                Log()->Message(_T("[%s:%d] FCM client connected."), LConnection->Socket()->Binding()->PeerIP(),
-                               LConnection->Socket()->Binding()->PeerPort());
+                Log()->Message(_T("[%s:%d] API client connected."), pConnection->Socket()->Binding()->PeerIP(),
+                               pConnection->Socket()->Binding()->PeerPort());
             }
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::DoFCMDisconnected(CObject *Sender) {
-            auto LConnection = dynamic_cast<CHTTPClientConnection *>(Sender);
-            if (LConnection != nullptr) {
-                if (!LConnection->ClosedGracefully()) {
-                    Log()->Message(_T("[%s:%d] FCM client disconnected."), LConnection->Socket()->Binding()->PeerIP(),
-                                   LConnection->Socket()->Binding()->PeerPort());
+        void CMessageServer::DoAPIDisconnected(CObject *Sender) {
+            auto pConnection = dynamic_cast<CHTTPClientConnection *>(Sender);
+            if (Assigned(pConnection)) {
+                auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
+                if (Assigned(pClient)) {
+                    auto pMessage = dynamic_cast<CMessage *> (pClient->Data().Objects("message"));
+                    delete pMessage;
+                }
+
+                if (!pConnection->ClosedGracefully()) {
+                    Log()->Message(_T("[%s:%d] API client disconnected."), pConnection->Socket()->Binding()->PeerIP(),
+                                   pConnection->Socket()->Binding()->PeerPort());
                 } else {
-                    Log()->Message(_T("FCM client disconnected."));
+                    Log()->Message(_T("API client disconnected."));
                 }
             }
         }
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::DoRequest(CObject *Sender) {
-            auto LConnection = dynamic_cast<CSMTPConnection *>(Sender);
-            const auto& LCommand = LConnection->Command();
+            auto pConnection = dynamic_cast<CSMTPConnection *>(Sender);
+            const auto& LCommand = pConnection->Command();
             CMemoryStream Stream;
             LCommand.ToBuffers(&Stream);
             CString S;
@@ -799,21 +995,21 @@ namespace Apostol {
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::DoReply(CObject *Sender) {
-            auto LConnection = dynamic_cast<CSMTPConnection *>(Sender);
-            const auto& LCommand = LConnection->Command();
+            auto pConnection = dynamic_cast<CSMTPConnection *>(Sender);
+            const auto& LCommand = pConnection->Command();
             DebugMessage("S: %s", LCommand.Reply().Text().c_str());
         }
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::DoException(CTCPConnection *AConnection, const Delphi::Exception::Exception &E) {
-            auto LConnection = dynamic_cast<CSMTPConnection *> (AConnection);
-            auto LClient = dynamic_cast<CSMTPClient *> (LConnection->Client());
+            auto pConnection = dynamic_cast<CSMTPConnection *> (AConnection);
+            auto pClient = dynamic_cast<CSMTPClient *> (pConnection->Client());
 
             CStringList SQL;
 
             AddAuthorize(SQL);
-            for (int i = 0; i < LClient->Messages().Count(); ++i) {
-                const auto& Message = LClient->Messages()[i];
+            for (int i = 0; i < pClient->Messages().Count(); ++i) {
+                const auto& Message = pClient->Messages()[i];
                 SetObjectLabel(SQL, Message.MsgId(), E.what());
             }
 
@@ -845,13 +1041,13 @@ namespace Apostol {
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::DoPostgresQueryExecuted(CPQPollQuery *APollQuery) {
-            CPQResult *Result;
+            CPQResult *pResult;
             try {
                 for (int I = 0; I < APollQuery->Count(); I++) {
-                    Result = APollQuery->Results(I);
+                    pResult = APollQuery->Results(I);
 
-                    if (Result->ExecStatus() != PGRES_TUPLES_OK)
-                        throw Delphi::Exception::EDBError(Result->GetErrorMessage());
+                    if (pResult->ExecStatus() != PGRES_TUPLES_OK)
+                        throw Delphi::Exception::EDBError(pResult->GetErrorMessage());
                 }
             } catch (Delphi::Exception::Exception &E) {
                 Log()->Error(APP_LOG_EMERG, 0, E.what());
