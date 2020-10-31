@@ -56,10 +56,10 @@ namespace Apostol {
 
             CSMTPManager m_MailManager;
 
-            CString m_ServiceToken;
-            CString m_AccessToken;
+            TPairs<CStringPairs> m_Tokens;
 
-            TPairs<CStringList> m_Profiles;
+            TPairs<CStringList> m_M2MProfiles;
+            TPairs<CStringList> m_SBAProfiles;
 
             void FetchCerts(CProvider &Provider);
 
@@ -72,6 +72,7 @@ namespace Apostol {
 
             void SendSMTP(const CPQueryResult &Messages);
             void SendFCM(const CPQueryResult &Messages);
+            void SendM2M(const CPQueryResult &Messages);
             void SendSBA(const CPQueryResult &Messages);
 
             CString CreateServiceToken(const CProvider& Provider, const CString &Application);
@@ -99,8 +100,8 @@ namespace Apostol {
             void DoCancel(const CMessage &Message, const CString &Error);
             void DoFail(const CMessage &Message, const CString &Error);
 
-            void DoRequest(CObject *Sender);
-            void DoReply(CObject *Sender);
+            void DoSMTPRequest(CObject *Sender);
+            void DoSMTPReply(CObject *Sender);
 
             void DoSMTPConnected(CObject *Sender);
             void DoSMTPDisconnected(CObject *Sender);
@@ -125,10 +126,14 @@ namespace Apostol {
             }
 
             void Run() override;
+            void Reload();
 
             void LoadSMTPConfig(const CString &FileName);
+            void LoadFCMConfig(const CString &FileName);
 
             static void InitSMTPConfig(const CIniFile &IniFile, const CString &Section, CSMTPConfig &Config);
+
+            static void InitM2MConfig(const CIniFile &IniFile, const CString &Profile, CStringList &Config);
             static void InitSBAConfig(const CIniFile &IniFile, const CString &Profile, CStringList &Config);
 
             CSMTPClient *GetSMTPClient(const CSMTPConfig &Config);
