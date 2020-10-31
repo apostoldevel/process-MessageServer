@@ -655,8 +655,8 @@ namespace Apostol {
                     pClient->OnConnected([this](auto &&Sender) { DoAPIConnected(Sender); });
                     pClient->OnDisconnected([this](auto &&Sender) { DoAPIDisconnected(Sender); });
 #else
-                    pClient->OnConnected(std::bind(&CMessageServer::DoFCMConnected, this, _1));
-                    pClient->OnDisconnected(std::bind(&CMessageServer::DoFCMDisconnected, this, _1));
+                    pClient->OnConnected(std::bind(&CMessageServer::DoAPIConnected, this, _1));
+                    pClient->OnDisconnected(std::bind(&CMessageServer::DoAPIDisconnected, this, _1));
 #endif
                     pClient->Active(true);
                 }
@@ -799,8 +799,8 @@ namespace Apostol {
                     pClient->OnConnected([this](auto &&Sender) { DoAPIConnected(Sender); });
                     pClient->OnDisconnected([this](auto &&Sender) { DoAPIDisconnected(Sender); });
 #else
-                    pClient->OnConnected(std::bind(&CMessageServer::DoFCMConnected, this, _1));
-                    pClient->OnDisconnected(std::bind(&CMessageServer::DoFCMDisconnected, this, _1));
+                    pClient->OnConnected(std::bind(&CMessageServer::DoAPIConnected, this, _1));
+                    pClient->OnDisconnected(std::bind(&CMessageServer::DoAPIDisconnected, this, _1));
 #endif
                     pClient->Active(true);
                 }
@@ -958,8 +958,8 @@ namespace Apostol {
                     pClient->OnConnected([this](auto &&Sender) { DoAPIConnected(Sender); });
                     pClient->OnDisconnected([this](auto &&Sender) { DoAPIDisconnected(Sender); });
 #else
-                    pClient->OnConnected(std::bind(&CMessageServer::DoFCMConnected, this, _1));
-                    pClient->OnDisconnected(std::bind(&CMessageServer::DoFCMDisconnected, this, _1));
+                    pClient->OnConnected(std::bind(&CMessageServer::DoAPIConnected, this, _1));
+                    pClient->OnDisconnected(std::bind(&CMessageServer::DoAPIDisconnected, this, _1));
 #endif
                     pClient->Active(true);
                 }
