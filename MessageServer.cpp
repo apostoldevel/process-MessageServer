@@ -75,7 +75,7 @@ namespace Apostol {
                 Provider.Name = providerName;
                 Provider.Params.Object().AddPair(PROVIDER_APPLICATION_NAME, Json);
             } else {
-                Log()->Error(APP_LOG_EMERG, 0, APP_FILE_NOT_FOUND, FileName.c_str());
+                Log()->Error(APP_LOG_EMERG, 0, APP_FILE_NOT_FOUND, ConfigFile.c_str());
             }
         }
         //--------------------------------------------------------------------------------------------------------------
