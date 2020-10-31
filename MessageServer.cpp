@@ -251,7 +251,7 @@ namespace Apostol {
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::Reload() {
-            Config()->Reload();
+            CServerProcess::Reload();
 
             LoadSMTPConfig(Config()->IniFile().ReadString(CONFIG_SECTION_NAME, "smtp", "conf/smtp.conf"));
             LoadFCMConfig(Config()->IniFile().ReadString(CONFIG_SECTION_NAME, "fcm", "conf/fcm.json"));

@@ -126,7 +126,7 @@ namespace Apostol {
             }
 
             void Run() override;
-            void Reload();
+            void Reload() override;
 
             void LoadSMTPConfig(const CString &FileName);
             void LoadFCMConfig(const CString &FileName);
