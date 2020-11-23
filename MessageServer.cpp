@@ -28,8 +28,8 @@ Author:
 #include "jwt.h"
 //----------------------------------------------------------------------------------------------------------------------
 
-#define FCM_PROVIDER_NAME "firebase"
-#define PROVIDER_APPLICATION_NAME "service_account"
+#define PROVIDER_NAME "google"
+#define PROVIDER_APPLICATION_NAME "firebase"
 #define CONFIG_SECTION_NAME "process/MessageServer"
 
 extern "C++" {
@@ -50,7 +50,7 @@ namespace Apostol {
             m_FixedDate = Now();
             m_CheckDate = Now();
 
-            m_HeartbeatInterval = 5;
+            m_HeartbeatInterval = 5000;
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -65,7 +65,7 @@ namespace Apostol {
 
             m_Providers.Clear();
 
-            const CString providerName(FCM_PROVIDER_NAME);
+            const CString providerName(PROVIDER_NAME);
 
             if (FileExists(ConfigFile.c_str())) {
                 int Index = m_Providers.AddPair(providerName, CProvider());
@@ -324,26 +324,9 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::FetchAccessToken(const CProvider &Provider) {
+        void CMessageServer::ProviderAccessToken(const CProvider &Provider) {
 
-            auto OnRequestToken = [](CHTTPClient *Sender, CHTTPRequest *ARequest) {
-
-                const auto &token_uri = Sender->Data()["token_uri"];
-                const auto &grant_type = Sender->Data()["grant_type"];
-                const auto &assertion = Sender->Data()["assertion"];
-
-                ARequest->Content = _T("grant_type=");
-                ARequest->Content << CHTTPServer::URLEncode(grant_type);
-
-                ARequest->Content << _T("&assertion=");
-                ARequest->Content << CHTTPServer::URLEncode(assertion);
-
-                CHTTPRequest::Prepare(ARequest, _T("POST"), token_uri.c_str(), _T("application/x-www-form-urlencoded"));
-
-                DebugRequest(ARequest);
-            };
-
-            auto OnReplyToken = [this](CTCPConnection *Sender) {
+            auto OnDone = [this](CTCPConnection *Sender) {
 
                 auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
                 auto pReply = pConnection->Reply();
@@ -352,34 +335,17 @@ namespace Apostol {
 
                 const CJSON Json(pReply->Content);
 
-                m_Tokens[FCM_PROVIDER_NAME].Values("access_token", Json["access_token"].AsString());
+                m_Tokens[PROVIDER_NAME].Values("access_token", Json["access_token"].AsString());
 
                 return true;
             };
 
-            auto OnException = [](CTCPConnection *Sender, const Delphi::Exception::Exception &E) {
+            const auto &token_uri = Provider.TokenURI(PROVIDER_APPLICATION_NAME);
+            const auto &service_token = CreateServiceToken(Provider, PROVIDER_APPLICATION_NAME);
 
-                auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
-                auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
+            m_Tokens[PROVIDER_NAME].Values("service_token", service_token);
 
-                DebugReply(pConnection->Reply());
-
-                Log()->Error(APP_LOG_EMERG, 0, "[%s:%d] %s", pClient->Host().c_str(), pClient->Port(), E.what());
-            };
-
-            CLocation URI("https://oauth2.googleapis.com/token");
-
-            auto pClient = GetClient(URI.hostname, URI.port);
-
-            pClient->Data().Values("token_uri", URI.pathname);
-            pClient->Data().Values("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer");
-            pClient->Data().Values("assertion", m_Tokens.Values(FCM_PROVIDER_NAME).Values("service_token"));
-
-            pClient->OnRequest(OnRequestToken);
-            pClient->OnExecute(OnReplyToken);
-            pClient->OnException(OnException);
-
-            pClient->Active(true);
+            FetchAccessToken(token_uri, service_token, OnDone);
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -405,6 +371,7 @@ namespace Apostol {
             };
 
             auto OnExecute = [this, &Provider](CTCPConnection *AConnection) {
+
                 auto pConnection = dynamic_cast<CHTTPClientConnection *> (AConnection);
                 auto pReply = pConnection->Reply();
 
@@ -419,9 +386,7 @@ namespace Apostol {
 
                     Provider.KeyStatus = CProvider::ksSuccess;
 
-                    m_Tokens[FCM_PROVIDER_NAME].Values("service_token", CreateServiceToken(Provider, PROVIDER_APPLICATION_NAME));
-
-                    FetchAccessToken(Provider);
+                    ProviderAccessToken(Provider);
                 } catch (Delphi::Exception::Exception &E) {
                     Provider.KeyStatus = CProvider::ksFailed;
                     Log()->Error(APP_LOG_EMERG, 0, "[Certificate] Message: %s", E.what());
@@ -453,7 +418,7 @@ namespace Apostol {
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::FetchProviders() {
-            auto& Provider = m_Providers[FCM_PROVIDER_NAME];
+            auto& Provider = m_Providers[PROVIDER_NAME];
             if (Provider.ApplicationExists(PROVIDER_APPLICATION_NAME)) {
                 if (Provider.KeyStatus == CProvider::ksUnknown) {
                     FetchCerts(Provider);
@@ -463,7 +428,7 @@ namespace Apostol {
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::CheckProviders() {
-            auto& Provider = m_Providers[FCM_PROVIDER_NAME];
+            auto& Provider = m_Providers[PROVIDER_NAME];
             if (Provider.ApplicationExists(PROVIDER_APPLICATION_NAME)) {
                 if (Provider.KeyStatus != CProvider::ksUnknown) {
                     Provider.KeyStatusTime = Now();
@@ -643,7 +608,7 @@ namespace Apostol {
                     auto pClient = GetClient(URI.hostname, URI.port);
 
                     pClient->Data().Values("uri", URI.pathname);
-                    pClient->Data().Values("access_token", m_Tokens[FCM_PROVIDER_NAME]["access_token"]);
+                    pClient->Data().Values("access_token", m_Tokens[PROVIDER_NAME]["access_token"]);
 
                     pClient->Data().AddObject("message", pMessage);
 
@@ -978,7 +943,7 @@ namespace Apostol {
                     CApostolModule::QueryToResults(APollQuery, Result);
                     // Skip Result[0] - api.set_session
                     SendSMTP(Result[1]);
-                    if (!m_Tokens[FCM_PROVIDER_NAME]["access_token"].IsEmpty())
+                    if (!m_Tokens[PROVIDER_NAME]["access_token"].IsEmpty())
                         SendFCM(Result[2]);
                     SendM2M(Result[3]);
                     SendSBA(Result[4]);
@@ -1018,7 +983,7 @@ namespace Apostol {
             auto now = Now();
 
             if ((now >= m_FixedDate)) {
-                m_FixedDate = now + (CDateTime) 55 * 60 / SecsPerDay; // 55 min
+                m_FixedDate = now + (CDateTime) 55 / MinsPerDay; // 55 min
 
                 CheckProviders();
                 FetchProviders();
@@ -1026,12 +991,11 @@ namespace Apostol {
 
             if ((now >= m_CheckDate)) {
                 CheckMessage();
-                m_CheckDate = now + (CDateTime) m_HeartbeatInterval / SecsPerDay;
+                m_CheckDate = now + (CDateTime) m_HeartbeatInterval / MSecsPerDay;
 
                 m_MailManager.CleanUp();
+                m_ClientManager.CleanUp();
             }
-
-            m_ClientManager.CleanUp();
         }
         //--------------------------------------------------------------------------------------------------------------
 

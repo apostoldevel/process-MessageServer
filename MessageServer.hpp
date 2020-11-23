@@ -63,8 +63,6 @@ namespace Apostol {
 
             void FetchCerts(CProvider &Provider);
 
-            void FetchAccessToken(const CProvider& Provider);
-
             void FetchProviders();
             void CheckProviders();
 
@@ -74,6 +72,8 @@ namespace Apostol {
             void SendFCM(const CPQueryResult &Messages);
             void SendM2M(const CPQueryResult &Messages);
             void SendSBA(const CPQueryResult &Messages);
+
+            void ProviderAccessToken(const CProvider& Provider);
 
             CString CreateServiceToken(const CProvider& Provider, const CString &Application);
 
@@ -139,9 +139,6 @@ namespace Apostol {
             CSMTPClient *GetSMTPClient(const CSMTPConfig &Config);
 
             CPQPollQuery *GetQuery(CPollConnection *AConnection) override;
-
-            int HeartbeatInterval() const { return m_HeartbeatInterval; }
-            void HeartbeatInterval(int Value) { m_HeartbeatInterval = Value; }
 
         };
         //--------------------------------------------------------------------------------------------------------------
