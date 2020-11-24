@@ -294,7 +294,7 @@ namespace Apostol {
             const auto &payload = Payload.IsNull() ? "null" : PQQuoteLiteral(Payload.ToString());
             SQL.Add(CString()
                 .MaxFormatSize(256 + Path.Size() + payload.Size())
-                .Format("SELECT * FROM rest.api('%s', %s::jsonb);",
+                .Format("SELECT * FROM api.run('POST', %s', %s::jsonb);",
                                     Path.c_str(),
                                     payload.c_str()
             ));
@@ -677,7 +677,7 @@ namespace Apostol {
                     Message.Object().AddPair("subject", pMessage->Subject());
                     Message.Object().AddPair("content", pReply->Content);
 
-                    RunAPI(SQL, "/message/set", Message);
+                    RunAPI(SQL, "/api/v1/message/set", Message);
 
                     try {
                         ExecSQL(SQL);
@@ -836,7 +836,7 @@ namespace Apostol {
                     Message.Object().AddPair("subject", pMessage->Subject());
                     Message.Object().AddPair("content", pReply->Content);
 
-                    RunAPI(SQL, "/message/set", Message);
+                    RunAPI(SQL, "/api/v1/message/set", Message);
 
                     try {
                         ExecSQL(SQL);
