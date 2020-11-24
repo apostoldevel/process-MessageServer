@@ -294,14 +294,14 @@ namespace Apostol {
             const auto &payload = Payload.IsNull() ? "null" : PQQuoteLiteral(Payload.ToString());
             SQL.Add(CString()
                 .MaxFormatSize(256 + Path.Size() + payload.Size())
-                .Format("SELECT * FROM api.run('POST', %s', %s::jsonb);",
+                .Format("SELECT * FROM api.run('POST', '%s', %s::jsonb);",
                                     Path.c_str(),
                                     payload.c_str()
             ));
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        CString CMessageServer::CreateServiceToken(const CProvider &Provider, const CString &Application) {
+        CString CMessageServer::CreateGoogleToken(const CProvider &Provider, const CString &Application) {
 
             const auto& private_key = std::string(Provider.Params[Application]["private_key"].AsString());
 
@@ -341,7 +341,7 @@ namespace Apostol {
             };
 
             const auto &token_uri = Provider.TokenURI(PROVIDER_APPLICATION_NAME);
-            const auto &service_token = CreateServiceToken(Provider, PROVIDER_APPLICATION_NAME);
+            const auto &service_token = CreateGoogleToken(Provider, PROVIDER_APPLICATION_NAME);
 
             m_Tokens[PROVIDER_NAME].Values("service_token", service_token);
 
