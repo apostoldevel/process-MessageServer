@@ -45,18 +45,28 @@ namespace Apostol {
 
         private:
 
+            CString m_ClientId;
+            CString m_ClientSecret;
+
+            CString m_Session;
+            CString m_Secret;
+
+            CString m_Agent;
+            CString m_Host;
+
             CProviders m_Providers;
 
             CSMTPConfigs m_Configs;
 
             int m_HeartbeatInterval;
 
+            CDateTime m_AuthDate;
             CDateTime m_FixedDate;
             CDateTime m_CheckDate;
 
             CSMTPManager m_MailManager;
 
-            TPairs<CStringPairs> m_Tokens;
+            CStringPairs m_Tokens;
 
             TPairs<CStringList> m_M2MProfiles;
             TPairs<CStringList> m_SBAProfiles;
@@ -82,10 +92,16 @@ namespace Apostol {
 
             bool InProgress(const CString &MsgId);
 
-            static void AddAuthorize(CStringList &SQL, const CString& Username = "mailbot", const CString& Area = "root");
+            void Authentication();
+            void Authorize(CStringList &SQL, const CString &Username);
+
             static void RunAction(CStringList &SQL, const CString &MsgId, const CString &Action);
+            static void SetArea(CStringList &SQL, const CString &Area);
             static void SetObjectLabel(CStringList &SQL, const CString &MsgId, const CString &Label);
-            static void RunAPI(CStringList &SQL, const CString &Path, const CJSON &Payload);
+
+            static void InitSMTPConfig(const CIniFile &IniFile, const CString &Section, CSMTPConfig &Config);
+            static void InitM2MConfig(const CIniFile &IniFile, const CString &Profile, CStringList &Config);
+            static void InitSBAConfig(const CIniFile &IniFile, const CString &Profile, CStringList &Config);
 
         protected:
 
@@ -130,11 +146,6 @@ namespace Apostol {
 
             void LoadSMTPConfig(const CString &FileName);
             void LoadFCMConfig(const CString &FileName);
-
-            static void InitSMTPConfig(const CIniFile &IniFile, const CString &Section, CSMTPConfig &Config);
-
-            static void InitM2MConfig(const CIniFile &IniFile, const CString &Profile, CStringList &Config);
-            static void InitSBAConfig(const CIniFile &IniFile, const CString &Profile, CStringList &Config);
 
             CSMTPClient *GetSMTPClient(const CSMTPConfig &Config);
 

@@ -29,8 +29,17 @@ Author:
 //----------------------------------------------------------------------------------------------------------------------
 
 #define PROVIDER_NAME "google"
-#define PROVIDER_APPLICATION_NAME "firebase"
+#define FIREBASE_APPLICATION_NAME "firebase"
+#define PROVIDER_APPLICATION_NAME "service"
 #define CONFIG_SECTION_NAME "process/MessageServer"
+
+#define MAIL_BOT_USERNAME "mailbot"
+#define API_BOT_USERNAME "apibot"
+
+#define QUERY_INDEX_SMTP    2
+#define QUERY_INDEX_FCM     3
+#define QUERY_INDEX_M2M     4
+#define QUERY_INDEX_SBA     5
 
 extern "C++" {
 
@@ -47,8 +56,14 @@ namespace Apostol {
         CMessageServer::CMessageServer(CCustomProcess *AParent, CApplication *AApplication):
                 inherited(AParent, AApplication, "message server") {
 
-            m_FixedDate = Now();
-            m_CheckDate = Now();
+            m_Agent = CString().Format("Message Server (%s)", Application()->Title().c_str());
+            m_Host = CApostolModule::GetIPByHostName(CApostolModule::GetHostName());
+
+            const auto now = Now();
+
+            m_AuthDate = now;
+            m_FixedDate = now;
+            m_CheckDate = now;
 
             m_HeartbeatInterval = 5000;
         }
@@ -73,7 +88,7 @@ namespace Apostol {
                 CJSONObject Json;
                 Json.LoadFromFile(ConfigFile.c_str());
                 Provider.Name = providerName;
-                Provider.Params.Object().AddPair(PROVIDER_APPLICATION_NAME, Json);
+                Provider.Params.Object().AddPair(FIREBASE_APPLICATION_NAME, Json);
             } else {
                 Log()->Error(APP_LOG_EMERG, 0, APP_FILE_NOT_FOUND, ConfigFile.c_str());
             }
@@ -259,8 +274,11 @@ namespace Apostol {
             LoadConfig(Config()->IniFile().ReadString(CONFIG_SECTION_NAME, "m2m", "conf/m2m.conf"), m_M2MProfiles, InitM2MConfig);
             LoadConfig(Config()->IniFile().ReadString(CONFIG_SECTION_NAME, "sba", "conf/sba.conf"), m_SBAProfiles, InitSBAConfig);
 
-            m_FixedDate = Now();
-            m_CheckDate = Now();
+            const auto now = Now();
+
+            m_AuthDate = now;
+            m_FixedDate = now;
+            m_CheckDate = now;
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -269,8 +287,64 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::AddAuthorize(CStringList &SQL, const CString& Username, const CString& Area) {
-            SQL.Add(CString().Format("SELECT * FROM api.set_session('%s', '%s');", Username.c_str(), Area.c_str()));
+        void CMessageServer::Authentication() {
+
+            auto OnExecuted = [this](CPQPollQuery *APollQuery) {
+
+                CPQueryResults Result;
+                CStringList SQL;
+
+                try {
+                    CApostolModule::QueryToResults(APollQuery, Result);
+                    const auto &login = Result[0][0];
+
+                    m_Session = login["session"];
+                    m_Secret = login["secret"];
+
+                    m_AuthDate = Now() + (CDateTime) 24 / HoursPerDay;
+                } catch (Delphi::Exception::Exception &E) {
+                    DoError(E);
+                }
+            };
+
+            auto OnException = [this](CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
+                DoError(E);
+            };
+
+            CString Application(PROVIDER_APPLICATION_NAME);
+
+            const auto &Providers = Server().Providers();
+            const auto &Provider = Providers.DefaultValue();
+
+            m_ClientId = Provider.ClientId(Application);
+            m_ClientSecret = Provider.Secret(Application);
+
+            CStringList SQL;
+
+            SQL.Add(CString().Format("SELECT * FROM api.login(%s, %s, %s, %s);",
+                                     PQQuoteLiteral(m_ClientId).c_str(),
+                                     PQQuoteLiteral(m_ClientSecret).c_str(),
+                                     PQQuoteLiteral(m_Agent).c_str(),
+                                     PQQuoteLiteral(m_Host).c_str()
+            ));
+
+            try {
+                ExecSQL(SQL, nullptr, OnExecuted, OnException);
+            } catch (Delphi::Exception::Exception &E) {
+                DoError(E);
+            }
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CMessageServer::Authorize(CStringList &SQL, const CString &Username) {
+            SQL.Add(CString().Format("SELECT * FROM api.authorize(%s);",
+                                     PQQuoteLiteral(m_Session).c_str()
+            ));
+
+            SQL.Add(CString().Format("SELECT * FROM api.su(%s, %s);",
+                                     PQQuoteLiteral(Username).c_str(),
+                                     PQQuoteLiteral(m_ClientSecret).c_str()
+            ));
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -282,21 +356,17 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::SetObjectLabel(CStringList &SQL, const CString &MsgId, const CString &Label) {
-            SQL.Add(CString().Format("SELECT * FROM api.set_object_label(%s, %s);",
-                                     MsgId.c_str(),
-                                     PQQuoteLiteral(Label).c_str()
+        void CMessageServer::SetArea(CStringList &SQL, const CString &Area) {
+            SQL.Add(CString().Format("SELECT * FROM api.set_session_area(%s);",
+                                     PQQuoteLiteral(Area).c_str()
             ));
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::RunAPI(CStringList &SQL, const CString &Path, const CJSON &Payload) {
-            const auto &payload = Payload.IsNull() ? "null" : PQQuoteLiteral(Payload.ToString());
-            SQL.Add(CString()
-                .MaxFormatSize(256 + Path.Size() + payload.Size())
-                .Format("SELECT * FROM api.run('POST', '%s', %s::jsonb);",
-                                    Path.c_str(),
-                                    payload.c_str()
+        void CMessageServer::SetObjectLabel(CStringList &SQL, const CString &MsgId, const CString &Label) {
+            SQL.Add(CString().Format("SELECT * FROM api.set_object_label(%s, %s);",
+                                     MsgId.c_str(),
+                                     PQQuoteLiteral(Label).c_str()
             ));
         }
         //--------------------------------------------------------------------------------------------------------------
@@ -335,15 +405,15 @@ namespace Apostol {
 
                 const CJSON Json(pReply->Content);
 
-                m_Tokens[PROVIDER_NAME].Values("access_token", Json["access_token"].AsString());
+                m_Tokens.Values("access_token", Json["access_token"].AsString());
 
                 return true;
             };
 
-            const auto &token_uri = Provider.TokenURI(PROVIDER_APPLICATION_NAME);
-            const auto &service_token = CreateGoogleToken(Provider, PROVIDER_APPLICATION_NAME);
+            const auto &token_uri = Provider.TokenURI(FIREBASE_APPLICATION_NAME);
+            const auto &service_token = CreateGoogleToken(Provider, FIREBASE_APPLICATION_NAME);
 
-            m_Tokens[PROVIDER_NAME].Values("service_token", service_token);
+            m_Tokens.Values("service_token", service_token);
 
             FetchAccessToken(token_uri, service_token, OnDone);
         }
@@ -351,7 +421,7 @@ namespace Apostol {
 
         void CMessageServer::FetchCerts(CProvider &Provider) {
 
-            const auto& URI = Provider.CertURI(PROVIDER_APPLICATION_NAME);
+            const auto& URI = Provider.CertURI(FIREBASE_APPLICATION_NAME);
 
             if (URI.IsEmpty()) {
                 Log()->Error(APP_LOG_INFO, 0, _T("Certificate URI in provider \"%s\" is empty."), Provider.Name.c_str());
@@ -361,7 +431,7 @@ namespace Apostol {
             Log()->Error(APP_LOG_INFO, 0, _T("Trying to fetch public keys from: %s"), URI.c_str());
 
             auto OnRequest = [&Provider](CHTTPClient *Sender, CHTTPRequest *ARequest) {
-                const auto& client_x509_cert_url = std::string(Provider.Params[PROVIDER_APPLICATION_NAME]["client_x509_cert_url"].AsString());
+                const auto& client_x509_cert_url = std::string(Provider.Params[FIREBASE_APPLICATION_NAME]["client_x509_cert_url"].AsString());
 
                 Provider.KeyStatusTime = Now();
                 Provider.KeyStatus = CProvider::ksFetching;
@@ -419,7 +489,7 @@ namespace Apostol {
 
         void CMessageServer::FetchProviders() {
             auto& Provider = m_Providers[PROVIDER_NAME];
-            if (Provider.ApplicationExists(PROVIDER_APPLICATION_NAME)) {
+            if (Provider.ApplicationExists(FIREBASE_APPLICATION_NAME)) {
                 if (Provider.KeyStatus == CProvider::ksUnknown) {
                     FetchCerts(Provider);
                 }
@@ -429,7 +499,7 @@ namespace Apostol {
 
         void CMessageServer::CheckProviders() {
             auto& Provider = m_Providers[PROVIDER_NAME];
-            if (Provider.ApplicationExists(PROVIDER_APPLICATION_NAME)) {
+            if (Provider.ApplicationExists(FIREBASE_APPLICATION_NAME)) {
                 if (Provider.KeyStatus != CProvider::ksUnknown) {
                     Provider.KeyStatusTime = Now();
                     Provider.KeyStatus = CProvider::ksUnknown;
@@ -608,7 +678,7 @@ namespace Apostol {
                     auto pClient = GetClient(URI.hostname, URI.port);
 
                     pClient->Data().Values("uri", URI.pathname);
-                    pClient->Data().Values("access_token", m_Tokens[PROVIDER_NAME]["access_token"]);
+                    pClient->Data().Values("access_token", m_Tokens["access_token"]);
 
                     pClient->Data().AddObject("message", pMessage);
 
@@ -665,19 +735,17 @@ namespace Apostol {
 
                     CStringList SQL;
 
-                    AddAuthorize(SQL, "apibot", Area);
+                    Authorize(SQL, API_BOT_USERNAME);
+                    SetArea(SQL, Area);
 
-                    CJSON Message;
-
-                    Message.Object().AddPair("parent", pMessage->MsgId());
-                    Message.Object().AddPair("type", "message.inbox");
-                    Message.Object().AddPair("agent", Agent);
-                    Message.Object().AddPair("profile", pMessage->From());
-                    Message.Object().AddPair("address", pMessage->To().First());
-                    Message.Object().AddPair("subject", pMessage->Subject());
-                    Message.Object().AddPair("content", pReply->Content);
-
-                    RunAPI(SQL, "/api/v1/message/set", Message);
+                    SQL.Add(CString().Format("SELECT * FROM api.set_message(null, %s, 'message.inbox', %s, %s, %s, %s, %s);",
+                                             PQQuoteLiteral(pMessage->MsgId()).c_str(),
+                                             PQQuoteLiteral(Agent).c_str(),
+                                             PQQuoteLiteral(pMessage->From()).c_str(),
+                                             PQQuoteLiteral(pMessage->To().First()).c_str(),
+                                             PQQuoteLiteral(pMessage->Subject()).c_str(),
+                                             PQQuoteLiteral(pReply->Content).c_str()
+                    ));
 
                     try {
                         ExecSQL(SQL);
@@ -716,8 +784,8 @@ namespace Apostol {
                     if (InProgress(MsgId))
                         continue;
 
-                    const auto &Agent = Record.Values("agentcode");
-                    const auto &Area = Record.Values("areacode");
+                    const auto &Agent = Record.Values("agent");
+                    const auto &Area = Record.Values("area");
 
                     const auto &Profile = Record.Values("profile");
                     const auto &Address = Record.Values("address");
@@ -824,19 +892,17 @@ namespace Apostol {
 
                     CStringList SQL;
 
-                    AddAuthorize(SQL, "apibot", Area);
+                    Authorize(SQL, API_BOT_USERNAME);
+                    SetArea(SQL, Area);
 
-                    CJSON Message;
-
-                    Message.Object().AddPair("parent", pMessage->MsgId());
-                    Message.Object().AddPair("type", "message.inbox");
-                    Message.Object().AddPair("agent", Agent);
-                    Message.Object().AddPair("profile", pMessage->From());
-                    Message.Object().AddPair("address", pMessage->To().First());
-                    Message.Object().AddPair("subject", pMessage->Subject());
-                    Message.Object().AddPair("content", pReply->Content);
-
-                    RunAPI(SQL, "/api/v1/message/set", Message);
+                    SQL.Add(CString().Format("SELECT * FROM api.set_message(null, %s, 'message.inbox', %s, %s, %s, %s, %s);",
+                                             PQQuoteLiteral(pMessage->MsgId()).c_str(),
+                                             PQQuoteLiteral(Agent).c_str(),
+                                             PQQuoteLiteral(pMessage->From()).c_str(),
+                                             PQQuoteLiteral(pMessage->To().First()).c_str(),
+                                             PQQuoteLiteral(pMessage->Subject()).c_str(),
+                                             PQQuoteLiteral(pReply->Content).c_str()
+                    ));
 
                     try {
                         ExecSQL(SQL);
@@ -875,8 +941,8 @@ namespace Apostol {
                     if (InProgress(MsgId))
                         continue;
 
-                    const auto &Agent = Record.Values("agentcode");
-                    const auto &Area = Record.Values("areacode");
+                    const auto &Agent = Record.Values("agent");
+                    const auto &Area = Record.Values("area");
 
                     const auto &Profile = Record.Values("profile");
                     const auto &Address = Record.Values("address");
@@ -941,12 +1007,12 @@ namespace Apostol {
 
                 try {
                     CApostolModule::QueryToResults(APollQuery, Result);
-                    // Skip Result[0] - api.set_session
-                    SendSMTP(Result[1]);
-                    if (!m_Tokens[PROVIDER_NAME]["access_token"].IsEmpty())
-                        SendFCM(Result[2]);
-                    SendM2M(Result[3]);
-                    SendSBA(Result[4]);
+
+                    SendSMTP(Result[QUERY_INDEX_SMTP]);
+                    if (!m_Tokens["access_token"].IsEmpty())
+                        SendFCM(Result[QUERY_INDEX_FCM]);
+                    SendM2M(Result[QUERY_INDEX_M2M]);
+                    SendSBA(Result[QUERY_INDEX_SBA]);
                 } catch (Delphi::Exception::Exception &E) {
                     DoError(E);
                 }
@@ -958,7 +1024,7 @@ namespace Apostol {
 
             CStringList SQL;
 
-            AddAuthorize(SQL);
+            Authorize(SQL, MAIL_BOT_USERNAME);
 
             SQL.Add("SELECT * FROM api.message('message.outbox', 'smtp.agent', 'prepared') ORDER BY created LIMIT 10;");
             SQL.Add("SELECT * FROM api.message('message.outbox', 'fcm.agent', 'prepared') ORDER BY created LIMIT 10;");
@@ -974,28 +1040,40 @@ namespace Apostol {
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::DoError(const Delphi::Exception::Exception &E) {
-            m_CheckDate = Now() + (CDateTime) 30 / SecsPerDay;
+            const auto now = Now();
+
+            m_Session.Clear();
+            m_Secret.Clear();
+
+            m_AuthDate = now + (CDateTime) m_HeartbeatInterval / MSecsPerDay;
+            m_CheckDate = now + (CDateTime) m_HeartbeatInterval * 2 / MSecsPerDay;
+
             Log()->Error(APP_LOG_EMERG, 0, E.what());
         }
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::DoHeartbeat() {
-            auto now = Now();
+            const auto now = Now();
 
             if ((now >= m_FixedDate)) {
                 m_FixedDate = now + (CDateTime) 55 / MinsPerDay; // 55 min
-
                 CheckProviders();
                 FetchProviders();
             }
 
-            if ((now >= m_CheckDate)) {
-                CheckMessage();
-                m_CheckDate = now + (CDateTime) m_HeartbeatInterval / MSecsPerDay;
-
-                m_MailManager.CleanUp();
-                m_ClientManager.CleanUp();
+            if ((now >= m_AuthDate)) {
+                Authentication();
             }
+
+            if ((now >= m_CheckDate)) {
+                m_CheckDate = now + (CDateTime) m_HeartbeatInterval / MSecsPerDay;
+                if (!m_Session.IsEmpty()) {
+                    CheckMessage();
+                }
+            }
+
+            m_MailManager.CleanUp();
+            m_ClientManager.CleanUp();
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -1016,7 +1094,7 @@ namespace Apostol {
         void CMessageServer::DoSend(const CMessage &Message) {
             CStringList SQL;
 
-            AddAuthorize(SQL);
+            Authorize(SQL, MAIL_BOT_USERNAME);
             RunAction(SQL, Message.MsgId(), "send");
 
             Log()->Message("[%s] Message sending.", Message.MsgId().c_str());
@@ -1032,7 +1110,7 @@ namespace Apostol {
         void CMessageServer::DoCancel(const CMessage &Message, const CString &Error) {
             CStringList SQL;
 
-            AddAuthorize(SQL);
+            Authorize(SQL, MAIL_BOT_USERNAME);
             RunAction(SQL, Message.MsgId(), "cancel");
             SetObjectLabel(SQL, Message.MsgId(), Error);
 
@@ -1049,7 +1127,7 @@ namespace Apostol {
         void CMessageServer::DoDone(const CMessage &Message) {
             CStringList SQL;
 
-            AddAuthorize(SQL);
+            Authorize(SQL, MAIL_BOT_USERNAME);
             RunAction(SQL, Message.MsgId(), "done");
             if (!Message.MessageId().IsEmpty())
                 SetObjectLabel(SQL, Message.MsgId(), Message.MessageId());
@@ -1067,7 +1145,7 @@ namespace Apostol {
         void CMessageServer::DoFail(const CMessage &Message, const CString &Error) {
             CStringList SQL;
 
-            AddAuthorize(SQL);
+            Authorize(SQL, MAIL_BOT_USERNAME);
             RunAction(SQL, Message.MsgId(), "fail");
             SetObjectLabel(SQL, Message.MsgId(), Error);
 
@@ -1148,13 +1226,13 @@ namespace Apostol {
 
             CStringList SQL;
 
-            AddAuthorize(SQL);
+            Authorize(SQL, MAIL_BOT_USERNAME);
             for (int i = 0; i < pClient->Messages().Count(); ++i) {
                 const auto& Message = pClient->Messages()[i];
                 SetObjectLabel(SQL, Message.MsgId(), E.what());
             }
 
-            m_CheckDate = Now() + (CDateTime) 10 / SecsPerDay;
+            Log()->Error(APP_LOG_EMERG, 0, E.what());
 
             try {
                 ExecSQL(SQL);
