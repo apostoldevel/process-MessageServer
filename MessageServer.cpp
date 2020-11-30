@@ -36,6 +36,8 @@ Author:
 #define MAIL_BOT_USERNAME "mailbot"
 #define API_BOT_USERNAME "apibot"
 
+#define QUERY_INDEX_AUTH    0
+#define QUERY_INDEX_SU      1
 #define QUERY_INDEX_SMTP    2
 #define QUERY_INDEX_FCM     3
 #define QUERY_INDEX_M2M     4
@@ -348,8 +350,8 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::RunAction(CStringList &SQL, const CString &MsgId, const CString &Action) {
-            SQL.Add(CString().Format("SELECT * FROM api.run_action(%s, %s);",
+        void CMessageServer::ExecuteObjectAction(CStringList &SQL, const CString &MsgId, const CString &Action) {
+            SQL.Add(CString().Format("SELECT * FROM api.execute_object_action(%s, %s);",
                                      MsgId.c_str(),
                                      PQQuoteLiteral(Action).c_str()
             ));
@@ -540,7 +542,8 @@ namespace Apostol {
 
                     if (Temp != profile) {
                         Temp = profile;
-                        pSMTPClient->SendMail();
+                        if (pSMTPClient != nullptr)
+                            pSMTPClient->SendMail();
                         pSMTPClient = nullptr;
                     }
 
@@ -1095,7 +1098,7 @@ namespace Apostol {
             CStringList SQL;
 
             Authorize(SQL, MAIL_BOT_USERNAME);
-            RunAction(SQL, Message.MsgId(), "send");
+            ExecuteObjectAction(SQL, Message.MsgId(), "send");
 
             Log()->Message("[%s] Message sending.", Message.MsgId().c_str());
 
@@ -1111,7 +1114,7 @@ namespace Apostol {
             CStringList SQL;
 
             Authorize(SQL, MAIL_BOT_USERNAME);
-            RunAction(SQL, Message.MsgId(), "cancel");
+            ExecuteObjectAction(SQL, Message.MsgId(), "cancel");
             SetObjectLabel(SQL, Message.MsgId(), Error);
 
             Log()->Message("[%s] Sent message canceled.", Message.MsgId().c_str());
@@ -1128,7 +1131,7 @@ namespace Apostol {
             CStringList SQL;
 
             Authorize(SQL, MAIL_BOT_USERNAME);
-            RunAction(SQL, Message.MsgId(), "done");
+            ExecuteObjectAction(SQL, Message.MsgId(), "done");
             if (!Message.MessageId().IsEmpty())
                 SetObjectLabel(SQL, Message.MsgId(), Message.MessageId());
 
@@ -1146,7 +1149,7 @@ namespace Apostol {
             CStringList SQL;
 
             Authorize(SQL, MAIL_BOT_USERNAME);
-            RunAction(SQL, Message.MsgId(), "fail");
+            ExecuteObjectAction(SQL, Message.MsgId(), "fail");
             SetObjectLabel(SQL, Message.MsgId(), Error);
 
             Log()->Message("[%s] Message was not sent.", Message.MsgId().c_str());
