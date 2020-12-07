@@ -149,8 +149,6 @@ namespace Apostol {
 
             CSMTPClient *GetSMTPClient(const CSMTPConfig &Config);
 
-            CPQPollQuery *GetQuery(CPollConnection *AConnection) override;
-
         };
         //--------------------------------------------------------------------------------------------------------------
 

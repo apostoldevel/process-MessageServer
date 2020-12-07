@@ -1245,23 +1245,6 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        CPQPollQuery *CMessageServer::GetQuery(CPollConnection *AConnection) {
-            auto LQuery = CServerProcess::GetQuery(AConnection);
-
-            if (Assigned(LQuery)) {
-#if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
-                LQuery->OnPollExecuted([this](auto && APollQuery) { DoPostgresQueryExecuted(APollQuery); });
-                LQuery->OnException([this](auto && APollQuery, auto && AException) { DoPostgresQueryException(APollQuery, AException); });
-#else
-                LQuery->OnPollExecuted(std::bind(&CMessageServer::DoPostgresQueryExecuted, this, _1));
-                LQuery->OnException(std::bind(&CMessageServer::DoPostgresQueryException, this, _1, _2));
-#endif
-            }
-
-            return LQuery;
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
         void CMessageServer::DoPostgresQueryExecuted(CPQPollQuery *APollQuery) {
             CPQResult *pResult;
             try {
@@ -1272,13 +1255,13 @@ namespace Apostol {
                         throw Delphi::Exception::EDBError(pResult->GetErrorMessage());
                 }
             } catch (Delphi::Exception::Exception &E) {
-                Log()->Error(APP_LOG_EMERG, 0, E.what());
+                DoError(E);
             }
         }
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::DoPostgresQueryException(CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
-            Log()->Error(APP_LOG_EMERG, 0, E.what());
+            DoError(E);
         }
         //--------------------------------------------------------------------------------------------------------------
 
