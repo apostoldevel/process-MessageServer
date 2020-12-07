@@ -1267,9 +1267,9 @@ namespace Apostol {
 
         void CMessageServer::DoSMTPRequest(CObject *Sender) {
             auto pConnection = dynamic_cast<CSMTPConnection *>(Sender);
-            const auto& LCommand = pConnection->Command();
+            const auto& command = pConnection->Command();
             CMemoryStream Stream;
-            LCommand.ToBuffers(&Stream);
+            command.ToBuffers(&Stream);
             CString S;
             S.LoadFromStream(&Stream);
             DebugMessage("C: %s", S.c_str());
@@ -1278,8 +1278,8 @@ namespace Apostol {
 
         void CMessageServer::DoSMTPReply(CObject *Sender) {
             auto pConnection = dynamic_cast<CSMTPConnection *>(Sender);
-            const auto& LCommand = pConnection->Command();
-            DebugMessage("S: %s", LCommand.Reply().Text().c_str());
+            const auto& command = pConnection->Command();
+            DebugMessage("S: %s", command.Reply().Text().c_str());
         }
         //--------------------------------------------------------------------------------------------------------------
     }
