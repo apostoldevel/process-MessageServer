@@ -360,7 +360,7 @@ namespace Apostol {
 
         void CMessageServer::SetArea(CStringList &SQL, const CString &Area) {
             SQL.Add(CString().Format("SELECT * FROM api.set_session_area(%s);",
-                                     PQQuoteLiteral(Area).c_str()
+                                     Area.c_str()
             ));
         }
         //--------------------------------------------------------------------------------------------------------------
