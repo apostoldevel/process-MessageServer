@@ -76,12 +76,13 @@ namespace Apostol {
             void FetchProviders();
             void CheckProviders();
 
-            void CheckMessage();
+            void CheckOutbox();
+            void CheckMessages(const CPQueryResult& Messages);
 
-            void SendSMTP(const CPQueryResult &Messages);
-            void SendFCM(const CPQueryResult &Messages);
-            void SendM2M(const CPQueryResult &Messages);
-            void SendSBA(const CPQueryResult &Messages);
+            void SendSMTP(const CStringPairs &Record);
+            void SendFCM(const CStringPairs &Record);
+            void SendM2M(const CStringPairs &Record);
+            void SendSBA(const CStringPairs &Record);
 
             void ProviderAccessToken(const CProvider& Provider);
 
@@ -93,7 +94,10 @@ namespace Apostol {
             bool InProgress(const CString &MsgId);
 
             void Authentication();
-            void Authorize(CStringList &SQL, const CString &Username);
+            static void Authorize(CStringList &SQL, const CString &Session, const CString &Username, const CString &Secret);
+
+            void CheckListen();
+            void InitListen();
 
             static void ExecuteObjectAction(CStringList &SQL, const CString &MsgId, const CString &Action);
             static void SetArea(CStringList &SQL, const CString &Area);
@@ -127,6 +131,8 @@ namespace Apostol {
 
             void DoException(CTCPConnection *AConnection, const Delphi::Exception::Exception &E);
             bool DoExecute(CTCPConnection *AConnection) override;
+
+            void DoPostgresNotify(CPQConnection *AConnection, PGnotify *ANotify);
 
             void DoPostgresQueryExecuted(CPQPollQuery *APollQuery);
             void DoPostgresQueryException(CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E);
