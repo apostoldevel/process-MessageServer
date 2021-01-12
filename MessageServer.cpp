@@ -89,7 +89,7 @@ namespace Apostol {
                 Provider.Name = providerName;
                 Provider.Params.Object().AddPair(FIREBASE_APPLICATION_NAME, Json);
             } else {
-                Log()->Error(APP_LOG_EMERG, 0, APP_FILE_NOT_FOUND, ConfigFile.c_str());
+                Log()->Error(APP_LOG_WARN, 0, APP_FILE_NOT_FOUND, ConfigFile.c_str());
             }
         }
         //--------------------------------------------------------------------------------------------------------------
@@ -126,7 +126,7 @@ namespace Apostol {
                     InitSMTPConfig(IniFile, defaultConfig.Name(), Config);
                 }
             } else {
-                Log()->Error(APP_LOG_EMERG, 0, APP_FILE_NOT_FOUND, ConfigFile.c_str());
+                Log()->Error(APP_LOG_WARN, 0, APP_FILE_NOT_FOUND, ConfigFile.c_str());
             }
         }
         //--------------------------------------------------------------------------------------------------------------
@@ -230,7 +230,7 @@ namespace Apostol {
                 }
                 catch (Delphi::Exception::Exception &E)
                 {
-                    Log()->Error(APP_LOG_EMERG, 0, E.what());
+                    Log()->Error(APP_LOG_ERR, 0, "%s", E.what());
                 }
 
                 if (sig_terminate || sig_quit) {
@@ -504,7 +504,7 @@ namespace Apostol {
                     ProviderAccessToken(Provider);
                 } catch (Delphi::Exception::Exception &E) {
                     Provider.KeyStatus = CProvider::ksFailed;
-                    Log()->Error(APP_LOG_EMERG, 0, "[Certificate] Message: %s", E.what());
+                    Log()->Error(APP_LOG_ERR, 0, "[Certificate] Message: %s", E.what());
                 }
 
                 pConnection->CloseConnection(true);
@@ -518,7 +518,7 @@ namespace Apostol {
                 Provider.KeyStatusTime = Now();
                 Provider.KeyStatus = CProvider::ksFailed;
 
-                Log()->Error(APP_LOG_EMERG, 0, "[%s:%d] %s", pClient->Host().c_str(), pClient->Port(), E.what());
+                Log()->Error(APP_LOG_ERR, 0, "[%s:%d] %s", pClient->Host().c_str(), pClient->Port(), E.what());
             };
 
             CLocation Location(URI);
@@ -655,7 +655,7 @@ namespace Apostol {
 
                 DebugReply(pConnection->Reply());
 
-                Log()->Error(APP_LOG_EMERG, 0, "[%s:%d] %s", pClient->Host().c_str(), pClient->Port(), E.what());
+                Log()->Error(APP_LOG_ERR, 0, "[%s:%d] %s", pClient->Host().c_str(), pClient->Port(), E.what());
             };
 
             const auto &id = Record.Values("id");
@@ -774,7 +774,7 @@ namespace Apostol {
 
                 DebugReply(pConnection->Reply());
 
-                Log()->Error(APP_LOG_EMERG, 0, "[%s:%d] %s", pClient->Host().c_str(), pClient->Port(), E.what());
+                Log()->Error(APP_LOG_ERR, 0, "[%s:%d] %s", pClient->Host().c_str(), pClient->Port(), E.what());
             };
 
             const auto &id = Record.Values("id");
@@ -918,7 +918,7 @@ namespace Apostol {
 
                 DebugReply(pConnection->Reply());
 
-                Log()->Error(APP_LOG_EMERG, 0, "[%s:%d] %s", pClient->Host().c_str(), pClient->Port(), E.what());
+                Log()->Error(APP_LOG_ERR, 0, "[%s:%d] %s", pClient->Host().c_str(), pClient->Port(), E.what());
             };
 
             const auto &id = Record.Values("id");
@@ -1039,7 +1039,7 @@ namespace Apostol {
             m_AuthDate = now + (CDateTime) m_HeartbeatInterval / MSecsPerDay;
             m_CheckDate = now + (CDateTime) m_HeartbeatInterval * 2 / MSecsPerDay;
 
-            Log()->Error(APP_LOG_EMERG, 0, E.what());
+            Log()->Error(APP_LOG_ERR, 0, "%s", E.what());
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -1224,7 +1224,7 @@ namespace Apostol {
                 SetObjectLabel(SQL, Message.MsgId(), E.what());
             }
 
-            Log()->Error(APP_LOG_EMERG, 0, E.what());
+            Log()->Error(APP_LOG_ERR, 0, "%s", E.what());
 
             try {
                 ExecSQL(SQL);
