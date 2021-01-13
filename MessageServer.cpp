@@ -1169,10 +1169,10 @@ namespace Apostol {
             auto pConnection = dynamic_cast<CSMTPConnection *>(Sender);
             if (Assigned(pConnection)) {
                 if (!pConnection->ClosedGracefully()) {
-                    Log()->Message(_T("[%s:%d] FCM client disconnected."), pConnection->Socket()->Binding()->PeerIP(),
+                    Log()->Message(_T("[%s:%d] SMTP client disconnected."), pConnection->Socket()->Binding()->PeerIP(),
                                    pConnection->Socket()->Binding()->PeerPort());
                 } else {
-                    Log()->Message(_T("FCM client disconnected."));
+                    Log()->Message(_T("SMTP client disconnected."));
                 }
             }
         }
