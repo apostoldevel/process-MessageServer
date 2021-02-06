@@ -1063,9 +1063,6 @@ namespace Apostol {
                     CheckOutbox();
                 }
             }
-
-            m_MailManager.CleanUp();
-            m_ClientManager.CleanUp();
         }
         //--------------------------------------------------------------------------------------------------------------
 
