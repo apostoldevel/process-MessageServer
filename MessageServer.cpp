@@ -395,7 +395,7 @@ namespace Apostol {
 
         void CMessageServer::ExecuteObjectAction(CStringList &SQL, const CString &MsgId, const CString &Action) {
             SQL.Add(CString().Format("SELECT * FROM api.execute_object_action(%s, %s);",
-                                     MsgId.c_str(),
+                                     PQQuoteLiteral(MsgId).c_str(),
                                      PQQuoteLiteral(Action).c_str()
             ));
         }
@@ -403,14 +403,14 @@ namespace Apostol {
 
         void CMessageServer::SetArea(CStringList &SQL, const CString &Area) {
             SQL.Add(CString().Format("SELECT * FROM api.set_session_area(%s);",
-                                     Area.c_str()
+                                     PQQuoteLiteral(Area).c_str()
             ));
         }
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::SetObjectLabel(CStringList &SQL, const CString &MsgId, const CString &Label) {
             SQL.Add(CString().Format("SELECT * FROM api.set_object_label(%s, %s);",
-                                     MsgId.c_str(),
+                                     PQQuoteLiteral(MsgId).c_str(),
                                      PQQuoteLiteral(Label).c_str()
             ));
         }
