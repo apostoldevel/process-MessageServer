@@ -1260,7 +1260,7 @@ namespace Apostol {
 
             Authorize(SQL, m_Session, MAIL_BOT_USERNAME, m_ClientSecret);
 
-            SQL.Add(CString().Format("SELECT * FROM api.get_message(%s);", ANotify->extra));
+            SQL.Add(CString().Format("SELECT * FROM api.get_message('%s');", ANotify->extra));
 
             try {
                 ExecSQL(SQL, nullptr, OnExecuted, OnException);
