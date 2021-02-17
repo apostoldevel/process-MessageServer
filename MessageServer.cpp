@@ -394,7 +394,7 @@ namespace Apostol {
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::ExecuteObjectAction(CStringList &SQL, const CString &MsgId, const CString &Action) {
-            SQL.Add(CString().Format("SELECT * FROM api.execute_object_action(%s::uuid, %s::uuid);",
+            SQL.Add(CString().Format("SELECT * FROM api.execute_object_action(%s::uuid, %s);",
                                      PQQuoteLiteral(MsgId).c_str(),
                                      PQQuoteLiteral(Action).c_str()
             ));
