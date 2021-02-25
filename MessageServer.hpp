@@ -68,8 +68,7 @@ namespace Apostol {
 
             CStringPairs m_Tokens;
 
-            TPairs<CStringList> m_M2MProfiles;
-            TPairs<CStringList> m_SBAProfiles;
+            TPairs<CStringListPairs> m_Profiles;
 
             void FetchCerts(CProvider &Provider);
 
@@ -80,12 +79,15 @@ namespace Apostol {
             void CheckMessages(const CPQueryResult& Messages);
 
             void SendSMTP(const CStringPairs &Record);
+            void SendAPI(const CStringPairs &Record);
             void SendFCM(const CStringPairs &Record);
             void SendM2M(const CStringPairs &Record);
             void SendSBA(const CStringPairs &Record);
 
-            void ProviderAccessToken(const CProvider& Provider);
+            void ServiceAccessToken(const CProvider& Provider);
+            void FirebaseAccessToken(const CProvider& Provider);
 
+            CString CreateToken(const CProvider& Provider, const CString &Application);
             CString CreateGoogleToken(const CProvider& Provider, const CString &Application);
 
             void BeforeRun() override;
@@ -104,6 +106,7 @@ namespace Apostol {
             static void SetObjectLabel(CStringList &SQL, const CString &MsgId, const CString &Label);
 
             static void InitSMTPConfig(const CIniFile &IniFile, const CString &Section, CSMTPConfig &Config);
+            static void InitAPIConfig(const CIniFile &IniFile, const CString &Profile, CStringList &Config);
             static void InitM2MConfig(const CIniFile &IniFile, const CString &Profile, CStringList &Config);
             static void InitSBAConfig(const CIniFile &IniFile, const CString &Profile, CStringList &Config);
 
@@ -150,8 +153,8 @@ namespace Apostol {
             void Run() override;
             void Reload() override;
 
-            void LoadSMTPConfig(const CString &FileName);
-            void LoadFCMConfig(const CString &FileName);
+            static void LoadSMTPConfig(const CString &FileName, CSMTPConfigs &Configs);
+            static void LoadFCMConfig(const CString &FileName, CProviders &Providers);
 
             CSMTPClient *GetSMTPClient(const CSMTPConfig &Config);
 

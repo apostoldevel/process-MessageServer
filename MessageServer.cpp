@@ -28,9 +28,12 @@ Author:
 #include "jwt.h"
 //----------------------------------------------------------------------------------------------------------------------
 
-#define PROVIDER_NAME "google"
+#define PROVIDER_NAME "default"
+#define SERVICE_APPLICATION_NAME "service"
+
+#define FIREBASE_PROVIDER_NAME "google"
 #define FIREBASE_APPLICATION_NAME "firebase"
-#define PROVIDER_APPLICATION_NAME "service"
+
 #define CONFIG_SECTION_NAME "process/MessageServer"
 
 #define MAIL_BOT_USERNAME "mailbot"
@@ -68,7 +71,7 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::LoadFCMConfig(const CString &FileName) {
+        void CMessageServer::LoadSMTPConfig(const CString &FileName, CSMTPConfigs &Configs) {
 
             const CString Prefix(Config()->Prefix());
             CString ConfigFile(FileName);
@@ -76,34 +79,6 @@ namespace Apostol {
             if (!path_separator(ConfigFile.front())) {
                 ConfigFile = Prefix + ConfigFile;
             }
-
-            m_Providers.Clear();
-
-            const CString providerName(PROVIDER_NAME);
-
-            if (FileExists(ConfigFile.c_str())) {
-                int Index = m_Providers.AddPair(providerName, CProvider());
-                auto& Provider = m_Providers[Index].Value();
-                CJSONObject Json;
-                Json.LoadFromFile(ConfigFile.c_str());
-                Provider.Name = providerName;
-                Provider.Params.Object().AddPair(FIREBASE_APPLICATION_NAME, Json);
-            } else {
-                Log()->Error(APP_LOG_WARN, 0, APP_FILE_NOT_FOUND, ConfigFile.c_str());
-            }
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        void CMessageServer::LoadSMTPConfig(const CString &FileName) {
-
-            const CString Prefix(Config()->Prefix());
-            CString ConfigFile(FileName);
-
-            if (!path_separator(ConfigFile.front())) {
-                ConfigFile = Prefix + ConfigFile;
-            }
-
-            m_Configs.Clear();
 
             if (FileExists(ConfigFile.c_str())) {
                 CIniFile IniFile(ConfigFile.c_str());
@@ -114,12 +89,12 @@ namespace Apostol {
 
                 for (int i = 0; i < Sections.Count(); i++) {
                     const auto& Section = Sections[i];
-                    int Index = m_Configs.AddPair(Section, CSMTPConfig());
-                    auto& Config = m_Configs[Index].Value();
+                    int Index = Configs.AddPair(Section, CSMTPConfig());
+                    auto& Config = Configs[Index].Value();
                     InitSMTPConfig(IniFile, Section, Config);
                 }
 
-                auto& defaultConfig = m_Configs.Default();
+                auto& defaultConfig = Configs.Default();
                 if (defaultConfig.Name().IsEmpty()) {
                     defaultConfig.Name() = _T("default");
                     auto& Config = defaultConfig.Value();
@@ -131,10 +106,40 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
+        void CMessageServer::LoadFCMConfig(const CString &FileName, CProviders &Providers) {
+
+            const CString Prefix(Config()->Prefix());
+            CString ConfigFile(FileName);
+
+            if (!path_separator(ConfigFile.front())) {
+                ConfigFile = Prefix + ConfigFile;
+            }
+
+            const CString providerName(FIREBASE_PROVIDER_NAME);
+
+            if (FileExists(ConfigFile.c_str())) {
+                int Index = Providers.AddPair(providerName, CProvider());
+                auto& Provider = Providers[Index].Value();
+                CJSONObject Json;
+                Json.LoadFromFile(ConfigFile.c_str());
+                Provider.Name = providerName;
+                Provider.Params.Object().AddPair(FIREBASE_APPLICATION_NAME, Json);
+            } else {
+                Log()->Error(APP_LOG_WARN, 0, APP_FILE_NOT_FOUND, ConfigFile.c_str());
+            }
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
         void CMessageServer::InitSMTPConfig(const CIniFile &IniFile, const CString &Section, CSMTPConfig &Config) {
             Config.Location() = IniFile.ReadString(Section, "host", "localhost:25");
             Config.UserName() = IniFile.ReadString(Section, "username", "smtp");
             Config.Password() = IniFile.ReadString(Section, "password", "smtp");
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CMessageServer::InitAPIConfig(const CIniFile &IniFile, const CString &Profile, CStringList &Config) {
+            Config.AddPair("uri", IniFile.ReadString(Profile, "uri", "http://localhost"));
+            Config.AddPair("apikey", IniFile.ReadString(Profile, "apikey", ""));
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -267,11 +272,23 @@ namespace Apostol {
         void CMessageServer::Reload() {
             CServerProcess::Reload();
 
-            LoadSMTPConfig(Config()->IniFile().ReadString(CONFIG_SECTION_NAME, "smtp", "conf/smtp.conf"));
-            LoadFCMConfig(Config()->IniFile().ReadString(CONFIG_SECTION_NAME, "fcm", "conf/fcm.json"));
+            m_Configs.Clear();
+            LoadSMTPConfig(Config()->IniFile().ReadString(CONFIG_SECTION_NAME, "smtp", "conf/smtp.conf"), m_Configs);
 
-            LoadConfig(Config()->IniFile().ReadString(CONFIG_SECTION_NAME, "m2m", "conf/m2m.conf"), m_M2MProfiles, InitM2MConfig);
-            LoadConfig(Config()->IniFile().ReadString(CONFIG_SECTION_NAME, "sba", "conf/sba.conf"), m_SBAProfiles, InitSBAConfig);
+            m_Providers.Clear();
+            m_Providers = Server().Providers();
+
+            LoadFCMConfig(Config()->IniFile().ReadString(CONFIG_SECTION_NAME, "fcm", "conf/fcm.json"), m_Providers);
+
+            m_Profiles.Clear();
+
+            m_Profiles.AddPair("api", CStringListPairs());
+            m_Profiles.AddPair("m2m", CStringListPairs());
+            m_Profiles.AddPair("sba", CStringListPairs());
+
+            LoadConfig(Config()->IniFile().ReadString(CONFIG_SECTION_NAME, "api", "conf/api.conf"), m_Profiles["api"], InitAPIConfig);
+            LoadConfig(Config()->IniFile().ReadString(CONFIG_SECTION_NAME, "m2m", "conf/m2m.conf"), m_Profiles["m2m"], InitM2MConfig);
+            LoadConfig(Config()->IniFile().ReadString(CONFIG_SECTION_NAME, "sba", "conf/sba.conf"), m_Profiles["sba"], InitSBAConfig);
 
             const auto now = Now();
 
@@ -356,7 +373,7 @@ namespace Apostol {
                 DoError(E);
             };
 
-            CString Application(PROVIDER_APPLICATION_NAME);
+            CString Application(SERVICE_APPLICATION_NAME);
 
             const auto &Providers = Server().Providers();
             const auto &Provider = Providers.DefaultValue();
@@ -416,6 +433,18 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
+        CString CMessageServer::CreateToken(const CProvider& Provider, const CString &Application) {
+            auto token = jwt::create()
+                    .set_issuer(Provider.Issuer(Application))
+                    .set_audience(Provider.ClientId(Application))
+                    .set_issued_at(std::chrono::system_clock::now())
+                    .set_expires_at(std::chrono::system_clock::now() + std::chrono::seconds{3600})
+                    .sign(jwt::algorithm::hs256{std::string(Provider.Secret(Application))});
+
+            return token;
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
         CString CMessageServer::CreateGoogleToken(const CProvider &Provider, const CString &Application) {
 
             const auto& private_key = std::string(Provider.Params[Application]["private_key"].AsString());
@@ -439,7 +468,37 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::ProviderAccessToken(const CProvider &Provider) {
+        void CMessageServer::ServiceAccessToken(const CProvider &Provider) {
+
+            auto OnDone = [this](CTCPConnection *Sender) {
+
+                auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
+                auto pReply = pConnection->Reply();
+
+                DebugReply(pReply);
+
+                const CJSON Json(pReply->Content);
+
+                m_Tokens.Values("api_token", Json["access_token"].AsString());
+
+                return true;
+            };
+
+            CString server_uri("http://localhost:");
+            server_uri << (int) Config()->Port();
+
+            const auto &token_uri = Provider.TokenURI(SERVICE_APPLICATION_NAME);
+            const auto &service_token = CreateToken(Provider, SERVICE_APPLICATION_NAME);
+
+            m_Tokens.Values("service_token", service_token);
+
+            if (!token_uri.IsEmpty()) {
+                FetchAccessToken(token_uri.front() == '/' ? server_uri + token_uri : token_uri, service_token, OnDone);
+            }
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CMessageServer::FirebaseAccessToken(const CProvider &Provider) {
 
             auto OnDone = [this](CTCPConnection *Sender) {
 
@@ -456,11 +515,11 @@ namespace Apostol {
             };
 
             const auto &token_uri = Provider.TokenURI(FIREBASE_APPLICATION_NAME);
-            const auto &service_token = CreateGoogleToken(Provider, FIREBASE_APPLICATION_NAME);
+            const auto &firebase_token = CreateGoogleToken(Provider, FIREBASE_APPLICATION_NAME);
 
-            m_Tokens.Values("service_token", service_token);
+            m_Tokens.Values("firebase_token", firebase_token);
 
-            FetchAccessToken(token_uri, service_token, OnDone);
+            FetchAccessToken(token_uri, firebase_token, OnDone);
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -501,7 +560,7 @@ namespace Apostol {
 
                     Provider.KeyStatus = CProvider::ksSuccess;
 
-                    ProviderAccessToken(Provider);
+                    FirebaseAccessToken(Provider);
                 } catch (Delphi::Exception::Exception &E) {
                     Provider.KeyStatus = CProvider::ksFailed;
                     Log()->Error(APP_LOG_ERR, 0, "[Certificate] Message: %s", E.what());
@@ -533,18 +592,27 @@ namespace Apostol {
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::FetchProviders() {
-            auto& Provider = m_Providers[PROVIDER_NAME];
-            if (Provider.ApplicationExists(FIREBASE_APPLICATION_NAME)) {
-                if (Provider.KeyStatus == CProvider::ksUnknown) {
-                    FetchCerts(Provider);
+            for (int i = 0; i < m_Providers.Count(); i++) {
+                auto& Provider = m_Providers[i].Value();
+                if (Provider.ApplicationExists(SERVICE_APPLICATION_NAME)) {
+                    if (Provider.KeyStatus == CProvider::ksUnknown) {
+                        Provider.KeyStatusTime = Now();
+                        ServiceAccessToken(Provider);
+                        Provider.KeyStatus = CProvider::ksSuccess;
+                    }
+                }
+                if (Provider.ApplicationExists(FIREBASE_APPLICATION_NAME)) {
+                    if (Provider.KeyStatus == CProvider::ksUnknown) {
+                        FetchCerts(Provider);
+                    }
                 }
             }
         }
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::CheckProviders() {
-            auto& Provider = m_Providers[PROVIDER_NAME];
-            if (Provider.ApplicationExists(FIREBASE_APPLICATION_NAME)) {
+            for (int i = 0; i < m_Providers.Count(); i++) {
+                auto& Provider = m_Providers[i].Value();
                 if (Provider.KeyStatus != CProvider::ksUnknown) {
                     Provider.KeyStatusTime = Now();
                     Provider.KeyStatus = CProvider::ksUnknown;
@@ -600,12 +668,12 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::SendFCM(const CStringPairs &Record) {
+        void CMessageServer::SendAPI(const CStringPairs &Record) {
 
             auto OnRequest = [](CHTTPClient *Sender, CHTTPRequest *ARequest) {
 
                 const auto &uri = Sender->Data()["uri"];
-                const auto &fcm_token = Sender->Data()["fcm_token"];
+                const auto &token = Sender->Data()["token"];
 
                 auto pMessage = dynamic_cast<CMessage *> (Sender->Data().Objects("message"));
                 if (pMessage != nullptr) {
@@ -614,7 +682,136 @@ namespace Apostol {
 
                 CHTTPRequest::Prepare(ARequest, _T("POST"), uri.c_str(), _T("application/json"));
 
-                ARequest->AddHeader("Authorization", "Bearer " + fcm_token);
+                ARequest->AddHeader("Authorization", "Bearer " + token);
+
+                DebugRequest(ARequest);
+            };
+
+            auto OnExecute = [this](CTCPConnection *Sender) {
+
+                auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
+                auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
+
+                auto pReply = pConnection->Reply();
+
+                DebugReply(pReply);
+
+                auto pMessage = dynamic_cast<CMessage *> (pClient->Data().Objects("message"));
+                if (pMessage != nullptr) {
+
+                    const auto& Agent = pClient->Data()["agent"];
+                    const auto& Area = pClient->Data()["area"];
+
+                    CStringList SQL;
+
+                    Authorize(SQL, m_Session, API_BOT_USERNAME, m_ClientSecret);
+                    SetArea(SQL, Area);
+
+                    SQL.Add(CString().Format("SELECT * FROM api.set_message(null, %s, 'message.inbox', %s, %s, %s, %s, %s);",
+                                             PQQuoteLiteral(pMessage->MsgId()).c_str(),
+                                             PQQuoteLiteral(Agent).c_str(),
+                                             PQQuoteLiteral(pMessage->From()).c_str(),
+                                             PQQuoteLiteral(pMessage->To().First()).c_str(),
+                                             PQQuoteLiteral(pMessage->Subject()).c_str(),
+                                             PQQuoteLiteral(pReply->Content).c_str()
+                    ));
+
+                    try {
+                        ExecSQL(SQL);
+                        pMessage->Done();
+                    } catch (Delphi::Exception::Exception &E) {
+                        DoError(E);
+                    }
+                }
+
+                return true;
+            };
+
+            auto OnException = [](CTCPConnection *Sender, const Delphi::Exception::Exception &E) {
+
+                auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
+                auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
+
+                auto pMessage = dynamic_cast<CMessage *> (pClient->Data().Objects("message"));
+                if (pMessage != nullptr) {
+                    pMessage->Fail(E.what());
+                }
+
+                DebugReply(pConnection->Reply());
+
+                Log()->Error(APP_LOG_ERR, 0, "[%s:%d] %s", pClient->Host().c_str(), pClient->Port(), E.what());
+            };
+
+            const auto &id = Record.Values("id");
+
+            const auto &agent = Record.Values("agent");
+            const auto &area = Record.Values("area");
+
+            const auto &profile = Record.Values("profile");
+            const auto &address = Record.Values("address");
+            const auto &subject = Record.Values("subject");
+            const auto &content = Record.Values("content");
+
+            auto pMessage = new CMessage();
+
+            pMessage->MsgId() = id;
+            pMessage->From() = profile;
+            pMessage->To() = address;
+            pMessage->Subject() = subject;
+            pMessage->Content() = content;
+
+#if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
+            pMessage->OnDone([this](auto &&Message) { DoDone(Message); });
+            pMessage->OnFail([this](auto &&Message, auto &&Error) { DoFail(Message, Error); });
+#else
+            pMessage->OnDone(std::bind(&CMessageServer::DoDone, this, _1));
+                    pMessage->OnFail(std::bind(&CMessageServer::DoFail, this, _1, _2));
+#endif
+            const auto& uri = m_Profiles["api"][profile]["uri"] + (address.front() == '/' ? address : '/' + address);
+            const auto& apikey = m_Profiles["api"][profile]["apikey"];
+
+            CLocation URI(uri);
+
+            auto pClient = GetClient(URI.hostname, URI.port);
+
+            pClient->Data().Values("uri", URI.pathname);
+            pClient->Data().Values("token", apikey.IsEmpty() ? (m_Tokens["api_token"].IsEmpty() ? "" : m_Tokens["api_token"]) : apikey);
+
+            pClient->Data().Values("agent", agent);
+            pClient->Data().Values("area", area);
+
+            pClient->Data().AddObject("message", pMessage);
+
+            pClient->OnRequest(OnRequest);
+            pClient->OnExecute(OnExecute);
+            pClient->OnException(OnException);
+
+#if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
+            pClient->OnConnected([this](auto &&Sender) { DoAPIConnected(Sender); });
+            pClient->OnDisconnected([this](auto &&Sender) { DoAPIDisconnected(Sender); });
+#else
+            pClient->OnConnected(std::bind(&CMessageServer::DoAPIConnected, this, _1));
+                    pClient->OnDisconnected(std::bind(&CMessageServer::DoAPIDisconnected, this, _1));
+#endif
+            pClient->Active(true);
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CMessageServer::SendFCM(const CStringPairs &Record) {
+
+            auto OnRequest = [](CHTTPClient *Sender, CHTTPRequest *ARequest) {
+
+                const auto &uri = Sender->Data()["uri"];
+                const auto &token = Sender->Data()["token"];
+
+                auto pMessage = dynamic_cast<CMessage *> (Sender->Data().Objects("message"));
+                if (pMessage != nullptr) {
+                    ARequest->Content = pMessage->Content();
+                }
+
+                CHTTPRequest::Prepare(ARequest, _T("POST"), uri.c_str(), _T("application/json"));
+
+                ARequest->AddHeader("Authorization", "Bearer " + token);
 
                 DebugRequest(ARequest);
             };
@@ -684,7 +881,7 @@ namespace Apostol {
             auto pClient = GetClient(URI.hostname, URI.port);
 
             pClient->Data().Values("uri", URI.pathname);
-            pClient->Data().Values("fcm_token", m_Tokens["fcm_token"]);
+            pClient->Data().Values("token", m_Tokens["fcm_token"]);
 
             pClient->Data().AddObject("message", pMessage);
 
@@ -778,8 +975,10 @@ namespace Apostol {
             };
 
             const auto &id = Record.Values("id");
+
             const auto &agent = Record.Values("agent");
             const auto &area = Record.Values("area");
+
             const auto &profile = Record.Values("profile");
             const auto &address = Record.Values("address");
             const auto &subject = Record.Values("subject");
@@ -800,9 +999,11 @@ namespace Apostol {
             pMessage->OnDone(std::bind(&CMessageServer::DoDone, this, _1));
                     pMessage->OnFail(std::bind(&CMessageServer::DoFail, this, _1, _2));
 #endif
-            const auto& uri = m_M2MProfiles[profile]["uri"];
-            const auto& apikey = m_M2MProfiles[profile]["apikey"];
-            const auto& naming = m_M2MProfiles[profile]["naming"];
+            const auto& uri = m_Profiles["m2m"][profile]["uri"];
+            const auto& apikey = m_Profiles["m2m"][profile]["apikey"];
+
+            if (uri.IsEmpty())
+                return;
 
             CLocation URI(uri);
 
@@ -810,7 +1011,6 @@ namespace Apostol {
 
             pClient->Data().Values("uri", URI.pathname);
             pClient->Data().Values("apikey", apikey);
-            pClient->Data().Values("naming", naming);
 
             pClient->Data().Values("agent", agent);
             pClient->Data().Values("area", area);
@@ -922,6 +1122,7 @@ namespace Apostol {
             };
 
             const auto &id = Record.Values("id");
+
             const auto &agent = Record.Values("agent");
             const auto &area = Record.Values("area");
 
@@ -945,9 +1146,9 @@ namespace Apostol {
             pMessage->OnDone(std::bind(&CMessageServer::DoDone, this, _1));
                     pMessage->OnFail(std::bind(&CMessageServer::DoFail, this, _1, _2));
 #endif
-            const auto& uri = m_SBAProfiles[profile]["uri"] + (address.front() == '/' ? address : '/' + address);
-            const auto& userName = m_SBAProfiles[profile]["username"];
-            const auto& password = m_SBAProfiles[profile]["password"];
+            const auto& uri = m_Profiles["sba"][profile]["uri"] + (address.front() == '/' ? address : '/' + address);
+            const auto& userName = m_Profiles["sba"][profile]["username"];
+            const auto& password = m_Profiles["sba"][profile]["password"];
 
             CLocation URI(uri);
 
@@ -982,16 +1183,24 @@ namespace Apostol {
             for (int i = 0; i < Messages.Count(); ++i) {
 
                 const auto &Record = Messages[i];
+
+                const auto &type = Record.Values("agenttypecode");
                 const auto &agent = Record.Values("agentcode");
 
-                if (agent == "smtp.agent") {
-                    SendSMTP(Record);
-                } else if (agent == "fcm.agent" && !m_Tokens["fcm_token"].IsEmpty()) {
-                    SendFCM(Record);
-                } else if (agent == "m2m.agent") {
-                    SendM2M(Record);
-                } else if (agent == "sba.agent") {
-                    SendSBA(Record);
+                if (type == "email.agent") {
+                    if (agent == "smtp.agent") {
+                        SendSMTP(Record);
+                    }
+                } else if (type == "api.agent") {
+                    if (agent == "fcm.agent" && !m_Tokens["fcm_token"].IsEmpty()) {
+                        SendFCM(Record);
+                    } else if (agent == "m2m.agent") {
+                        SendM2M(Record);
+                    } else if (agent == "sba.agent") {
+                        SendSBA(Record);
+                    } else {
+                        SendAPI(Record);
+                    }
                 }
             }
         }
