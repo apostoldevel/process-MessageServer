@@ -707,7 +707,9 @@ namespace Apostol {
                     Authorize(SQL, m_Session, API_BOT_USERNAME, m_ClientSecret);
                     SetArea(SQL, Area);
 
-                    SQL.Add(CString().Format("SELECT * FROM api.set_message(null, %s, 'message.inbox', %s, %s, %s, %s, %s);",
+                    SQL.Add(CString()
+                                    .MaxFormatSize(256 + pMessage->MsgId().Size() + Agent.Size() + pMessage->From().Size() + pMessage->To().First().Size() + pMessage->Subject().Size() + pReply->Content.Size())
+                                    .Format("SELECT * FROM api.set_message(null, %s, 'message.inbox', %s, %s, %s, %s, %s);",
                                              PQQuoteLiteral(pMessage->MsgId()).c_str(),
                                              PQQuoteLiteral(Agent).c_str(),
                                              PQQuoteLiteral(pMessage->From()).c_str(),
@@ -939,7 +941,9 @@ namespace Apostol {
                     Authorize(SQL, m_Session, API_BOT_USERNAME, m_ClientSecret);
                     SetArea(SQL, Area);
 
-                    SQL.Add(CString().Format("SELECT * FROM api.set_message(null, %s, 'message.inbox', %s, %s, %s, %s, %s);",
+                    SQL.Add(CString()
+                                    .MaxFormatSize(256 + pMessage->MsgId().Size() + Agent.Size() + pMessage->From().Size() + pMessage->To().First().Size() + pMessage->Subject().Size() + pReply->Content.Size())
+                                    .Format("SELECT * FROM api.set_message(null, %s, 'message.inbox', %s, %s, %s, %s, %s);",
                                              PQQuoteLiteral(pMessage->MsgId()).c_str(),
                                              PQQuoteLiteral(Agent).c_str(),
                                              PQQuoteLiteral(pMessage->From()).c_str(),
@@ -1086,7 +1090,9 @@ namespace Apostol {
                     Authorize(SQL, m_Session, API_BOT_USERNAME, m_ClientSecret);
                     SetArea(SQL, Area);
 
-                    SQL.Add(CString().Format("SELECT * FROM api.set_message(null, %s, 'message.inbox', %s, %s, %s, %s, %s);",
+                    SQL.Add(CString()
+                                    .MaxFormatSize(256 + pMessage->MsgId().Size() + Agent.Size() + pMessage->From().Size() + pMessage->To().First().Size() + pMessage->Subject().Size() + pReply->Content.Size())
+                                    .Format("SELECT * FROM api.set_message(null, %s, 'message.inbox', %s, %s, %s, %s, %s);",
                                              PQQuoteLiteral(pMessage->MsgId()).c_str(),
                                              PQQuoteLiteral(Agent).c_str(),
                                              PQQuoteLiteral(pMessage->From()).c_str(),
