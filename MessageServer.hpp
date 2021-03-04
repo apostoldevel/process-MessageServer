@@ -66,7 +66,7 @@ namespace Apostol {
 
             CSMTPManager m_MailManager;
 
-            CStringPairs m_Tokens;
+            CStringListPairs m_Tokens;
 
             TPairs<CStringListPairs> m_Profiles;
 
@@ -79,15 +79,14 @@ namespace Apostol {
             void CheckMessages(const CPQueryResult& Messages);
 
             void SendSMTP(const CStringPairs &Record);
-            void SendAPI(const CStringPairs &Record);
-            void SendFCM(const CStringPairs &Record);
-            void SendM2M(const CStringPairs &Record);
-            void SendSBA(const CStringPairs &Record);
+            void SendAPI(const CStringPairs &Record, const CStringListPairs &Config);
+            void SendFCM(const CStringPairs &Record, const CStringListPairs &Config);
+            void SendM2M(const CStringPairs &Record, const CStringListPairs &Config);
+            void SendSBA(const CStringPairs &Record, const CStringListPairs &Config);
 
-            void ServiceAccessToken(const CProvider& Provider);
-            void FirebaseAccessToken(const CProvider& Provider);
+            void CreateAccessToken(const CProvider &Provider, const CString &Application, CStringList &Tokens);
 
-            CString CreateToken(const CProvider& Provider, const CString &Application);
+            static CString CreateToken(const CProvider& Provider, const CString &Application);
             CString CreateGoogleToken(const CProvider& Provider, const CString &Application);
 
             void BeforeRun() override;
@@ -106,9 +105,7 @@ namespace Apostol {
             static void SetObjectLabel(CStringList &SQL, const CString &MsgId, const CString &Label);
 
             static void InitSMTPConfig(const CIniFile &IniFile, const CString &Section, CSMTPConfig &Config);
-            static void InitAPIConfig(const CIniFile &IniFile, const CString &Profile, CStringList &Config);
-            static void InitM2MConfig(const CIniFile &IniFile, const CString &Profile, CStringList &Config);
-            static void InitSBAConfig(const CIniFile &IniFile, const CString &Profile, CStringList &Config);
+            static void InitConfig(const CIniFile &IniFile, const CString &Profile, CStringList &Config);
 
         protected:
 
@@ -154,7 +151,6 @@ namespace Apostol {
             void Reload() override;
 
             static void LoadSMTPConfig(const CString &FileName, CSMTPConfigs &Configs);
-            static void LoadFCMConfig(const CString &FileName, CProviders &Providers);
 
             CSMTPClient *GetSMTPClient(const CSMTPConfig &Config);
 
