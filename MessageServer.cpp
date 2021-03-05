@@ -76,7 +76,7 @@ namespace Apostol {
 
             Application()->Header(Application()->Name() + ": message server");
 
-            Log()->Debug(0, MSG_PROCESS_START, GetProcessName(), Application()->Header().c_str());
+            Log()->Debug(APP_LOG_DEBUG_CORE, MSG_PROCESS_START, GetProcessName(), Application()->Header().c_str());
 
             InitSignals();
 
@@ -86,7 +86,7 @@ namespace Apostol {
 
             InitializePQServer(Application()->Title());
 
-            PQServerStart("helper");
+            PQServerStart(_T("helper"));
 
             SigProcMask(SIG_UNBLOCK, SigAddSet(&set));
 
@@ -103,7 +103,7 @@ namespace Apostol {
         void CMessageServer::Run() {
             while (!sig_exiting) {
 
-                log_debug0(APP_LOG_DEBUG_EVENT, Log(), 0, "message server cycle");
+                Log()->Debug(APP_LOG_DEBUG_EVENT, _T("message server cycle"));
 
                 try
                 {
@@ -117,8 +117,8 @@ namespace Apostol {
                 if (sig_terminate || sig_quit) {
                     if (sig_quit) {
                         sig_quit = 0;
-                        Log()->Error(APP_LOG_NOTICE, 0, "gracefully shutting down");
-                        Application()->Header("message server is shutting down");
+                        Log()->Debug(APP_LOG_DEBUG_EVENT, _T("gracefully shutting down"));
+                        Application()->Header(_T("message server is shutting down"));
                     }
 
                     //DoExit();
@@ -130,18 +130,18 @@ namespace Apostol {
 
                 if (sig_reconfigure) {
                     sig_reconfigure = 0;
-                    Log()->Error(APP_LOG_NOTICE, 0, "reconfiguring");
+                    Log()->Debug(APP_LOG_DEBUG_EVENT, _T("reconfiguring"));
 
                     Reload();
                 }
 
                 if (sig_reopen) {
                     sig_reopen = 0;
-                    Log()->Error(APP_LOG_NOTICE, 0, "reopening logs");
+                    Log()->Debug(APP_LOG_DEBUG_EVENT, _T("reopening logs"));
                 }
             }
 
-            Log()->Error(APP_LOG_NOTICE, 0, "stop message server");
+            Log()->Debug(APP_LOG_DEBUG_EVENT, _T("stop message server"));
         }
         //--------------------------------------------------------------------------------------------------------------
 
