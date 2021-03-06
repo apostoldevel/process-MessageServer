@@ -722,7 +722,7 @@ namespace Apostol {
             pMessage->OnFail(std::bind(&CMessageServer::DoFail, this, _1, _2));
 #endif
             const auto& uri = Config[profile]["uri"];
-            const auto& auth = Config[profile]["auth"].Lower();
+            const auto& auth = Config[profile]["auth"];
             const auto& token = Config[profile]["token"];
             const auto& provider = Config[profile]["provider"].Lower();
             const auto& token_type = Config[profile]["token_type"].Lower();
