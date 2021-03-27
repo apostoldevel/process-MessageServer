@@ -418,6 +418,10 @@ namespace Apostol {
 
             for (int i = 0; i < configs.Count(); ++i) {
                 const auto& config = configs[i].Lower();
+
+                if (config == "enable")
+                    continue;
+
                 if (config == "smtp") {
                     LoadSMTPConfig(Config()->IniFile().ReadString(CONFIG_SECTION_NAME, config, CString().Format("conf/%s.conf", config.c_str())), m_Configs);
                 } else {
