@@ -1486,9 +1486,9 @@ namespace Apostol {
             auto pConnection = dynamic_cast<CSMTPConnection *>(Sender);
             const auto& command = pConnection->Command();
             CMemoryStream Stream;
-            command.ToBuffers(&Stream);
+            command.ToBuffers(Stream);
             CString S;
-            S.LoadFromStream(&Stream);
+            S.LoadFromStream(Stream);
             DebugMessage("C: %s", S.c_str());
         }
         //--------------------------------------------------------------------------------------------------------------
