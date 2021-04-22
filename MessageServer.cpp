@@ -162,7 +162,7 @@ namespace Apostol {
             const auto& private_key = std::string(Provider.Params[Application]["private_key"].AsString());
 
             const auto& kid = std::string(Provider.Params[Application]["private_key_id"].AsString());
-            const auto& public_key = std::string(OAuth2::Helper::GetPublicKey(m_Providers, kid));
+            const auto& public_key = std::string(Provider.PublicKey(kid));
 
             const auto& iss = std::string(Provider.Params[Application]["client_email"].AsString());
             const auto& aud = std::string("https://oauth2.googleapis.com/token");
@@ -244,6 +244,8 @@ namespace Apostol {
 
                     Provider.Keys.Clear();
                     Provider.Keys << pReply->Content;
+
+                    DebugMessage("\nKeys:\n%s", Provider.Keys.ToString().c_str());
 
                     Provider.KeyStatus = CProvider::ksSuccess;
 

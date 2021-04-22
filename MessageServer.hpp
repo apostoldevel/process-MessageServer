@@ -87,7 +87,7 @@ namespace Apostol {
             void CreateAccessToken(const CProvider &Provider, const CString &Application, CStringList &Tokens);
 
             static CString CreateToken(const CProvider& Provider, const CString &Application);
-            CString CreateGoogleToken(const CProvider& Provider, const CString &Application);
+            static CString CreateGoogleToken(const CProvider& Provider, const CString &Application);
 
             void BeforeRun() override;
             void AfterRun() override;
