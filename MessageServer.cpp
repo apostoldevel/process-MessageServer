@@ -159,12 +159,12 @@ namespace Apostol {
 
         CString CMessageServer::CreateGoogleToken(const CProvider &Provider, const CString &Application) {
 
-            const auto& private_key = std::string(Provider.Params[Application]["private_key"].AsString());
+            const auto& private_key = std::string(Provider.Applications()[Application]["private_key"].AsString());
 
-            const auto& kid = std::string(Provider.Params[Application]["private_key_id"].AsString());
+            const auto& kid = std::string(Provider.Applications()[Application]["private_key_id"].AsString());
             const auto& public_key = std::string(Provider.PublicKey(kid));
 
-            const auto& iss = std::string(Provider.Params[Application]["client_email"].AsString());
+            const auto& iss = std::string(Provider.Applications()[Application]["client_email"].AsString());
             const auto& aud = std::string("https://oauth2.googleapis.com/token");
             const auto& scope = std::string("https://www.googleapis.com/auth/firebase.messaging");
 
@@ -210,28 +210,28 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::FetchCerts(CProvider &Provider) {
+        void CMessageServer::FetchCerts(CProvider &Provider, const CString &Application) {
 
-            const auto& URI = Provider.CertURI(FIREBASE_APPLICATION_NAME);
+            const auto& URI = Provider.CertURI(Application);
 
             if (URI.IsEmpty()) {
-                Log()->Error(APP_LOG_INFO, 0, _T("Certificate URI in provider \"%s\" is empty."), Provider.Name.c_str());
+                Log()->Error(APP_LOG_INFO, 0, _T("Certificate URI in provider \"%s\" is empty."), Provider.Name().c_str());
                 return;
             }
 
             Log()->Error(APP_LOG_INFO, 0, _T("Trying to fetch public keys from: %s"), URI.c_str());
 
-            auto OnRequest = [&Provider](CHTTPClient *Sender, CHTTPRequest *ARequest) {
-                const auto& client_x509_cert_url = std::string(Provider.Params[FIREBASE_APPLICATION_NAME]["client_x509_cert_url"].AsString());
+            auto OnRequest = [&Provider, &Application](CHTTPClient *Sender, CHTTPRequest *ARequest) {
+                const auto& client_x509_cert_url = std::string(Provider.Applications()[Application]["client_x509_cert_url"].AsString());
 
-                Provider.KeyStatusTime = Now();
-                Provider.KeyStatus = CProvider::ksFetching;
+                Provider.KeyStatusTime(Now());
+                Provider.KeyStatus(ksFetching);
 
                 CLocation Location(client_x509_cert_url);
                 CHTTPRequest::Prepare(ARequest, "GET", Location.pathname.c_str());
             };
 
-            auto OnExecute = [this, &Provider](CTCPConnection *AConnection) {
+            auto OnExecute = [this, &Provider, &Application](CTCPConnection *AConnection) {
 
                 auto pConnection = dynamic_cast<CHTTPClientConnection *> (AConnection);
                 auto pReply = pConnection->Reply();
@@ -240,18 +240,16 @@ namespace Apostol {
                     DebugRequest(pConnection->Request());
                     DebugReply(pReply);
 
-                    Provider.KeyStatusTime = Now();
+                    Provider.KeyStatusTime(Now());
 
-                    Provider.Keys.Clear();
-                    Provider.Keys << pReply->Content;
+                    Provider.Keys().Clear();
+                    Provider.Keys() << pReply->Content;
 
-                    DebugMessage("\nKeys:\n%s", Provider.Keys.ToString().c_str());
+                    Provider.KeyStatus(ksSuccess);
 
-                    Provider.KeyStatus = CProvider::ksSuccess;
-
-                    CreateAccessToken(Provider, FIREBASE_APPLICATION_NAME, m_Tokens[GOOGLE_PROVIDER_NAME]);
+                    CreateAccessToken(Provider, Application, m_Tokens[Provider.Name()]);
                 } catch (Delphi::Exception::Exception &E) {
-                    Provider.KeyStatus = CProvider::ksFailed;
+                    Provider.KeyStatus(ksFailed);
                     Log()->Error(APP_LOG_ERR, 0, "[Certificate] Message: %s", E.what());
                 }
 
@@ -263,8 +261,8 @@ namespace Apostol {
                 auto pConnection = dynamic_cast<CHTTPClientConnection *> (AConnection);
                 auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
 
-                Provider.KeyStatusTime = Now();
-                Provider.KeyStatus = CProvider::ksFailed;
+                Provider.KeyStatusTime(Now());
+                Provider.KeyStatus(ksFailed);
 
                 Log()->Error(APP_LOG_ERR, 0, "[%s:%d] %s", pClient->Host().c_str(), pClient->Port(), E.what());
             };
@@ -283,16 +281,20 @@ namespace Apostol {
         void CMessageServer::FetchProviders() {
             for (int i = 0; i < m_Providers.Count(); i++) {
                 auto& Provider = m_Providers[i].Value();
-                if (Provider.ApplicationExists(SERVICE_APPLICATION_NAME)) {
-                    if (Provider.KeyStatus == CProvider::ksUnknown) {
-                        Provider.KeyStatusTime = Now();
-                        CreateAccessToken(Provider, SERVICE_APPLICATION_NAME, m_Tokens[SYSTEM_PROVIDER_NAME]);
-                        Provider.KeyStatus = CProvider::ksSuccess;
-                    }
-                }
-                if (Provider.ApplicationExists(FIREBASE_APPLICATION_NAME)) {
-                    if (Provider.KeyStatus == CProvider::ksUnknown) {
-                        FetchCerts(Provider);
+                for (int j = 0; j < Provider.Applications().Count(); ++j) {
+                    const auto &app = Provider.Applications().Members(j);
+                    if (app["type"].AsString() == "service_account") {
+                        if (!app["auth_provider_x509_cert_url"].AsString().IsEmpty()) {
+                            if (Provider.KeyStatus() == ksUnknown) {
+                                FetchCerts(Provider, app.String());
+                            }
+                        } else {
+                            if (Provider.KeyStatus() == ksUnknown) {
+                                Provider.KeyStatusTime(Now());
+                                CreateAccessToken(Provider, app.String(), m_Tokens[Provider.Name()]);
+                                Provider.KeyStatus(ksSuccess);
+                            }
+                        }
                     }
                 }
             }
@@ -302,9 +304,9 @@ namespace Apostol {
         void CMessageServer::CheckProviders() {
             for (int i = 0; i < m_Providers.Count(); i++) {
                 auto& Provider = m_Providers[i].Value();
-                if (Provider.KeyStatus != CProvider::ksUnknown) {
-                    Provider.KeyStatusTime = Now();
-                    Provider.KeyStatus = CProvider::ksUnknown;
+                if (Provider.KeyStatus() != ksUnknown) {
+                    Provider.KeyStatusTime(Now());
+                    Provider.KeyStatus(ksUnknown);
                 }
             }
         }
@@ -440,6 +442,7 @@ namespace Apostol {
                     if (!oauth2.IsEmpty()) {
                         const auto &provider = config["provider"];
                         const auto &application = config["application"];
+                        m_Tokens.AddPair(provider, CStringList());
                         LoadOAuth2(oauth2, provider.empty() ? SYSTEM_PROVIDER_NAME : provider, application.empty() ? SERVICE_APPLICATION_NAME : application, m_Providers);
                     }
                 }

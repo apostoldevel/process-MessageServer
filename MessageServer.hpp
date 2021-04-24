@@ -70,7 +70,7 @@ namespace Apostol {
 
             TPairs<CStringListPairs> m_Profiles;
 
-            void FetchCerts(CProvider &Provider);
+            void FetchCerts(CProvider &Provider, const CString &Application);
 
             void FetchProviders();
             void CheckProviders();
@@ -103,6 +103,9 @@ namespace Apostol {
             static void ExecuteObjectAction(CStringList &SQL, const CString &MsgId, const CString &Action);
             static void SetArea(CStringList &SQL, const CString &Area);
             static void SetObjectLabel(CStringList &SQL, const CString &MsgId, const CString &Label);
+
+            static void LoadSMTPConfig(const CString &FileName, CSMTPConfigs &Configs);
+            CSMTPClient *GetSMTPClient(const CSMTPConfig &Config);
 
             static void InitSMTPConfig(const CIniFile &IniFile, const CString &Section, CSMTPConfig &Config);
             static void InitConfig(const CIniFile &IniFile, const CString &Profile, CStringList &Config);
@@ -149,11 +152,6 @@ namespace Apostol {
 
             void Run() override;
             void Reload() override;
-
-            static void LoadSMTPConfig(const CString &FileName, CSMTPConfigs &Configs);
-
-            CSMTPClient *GetSMTPClient(const CSMTPConfig &Config);
-
         };
         //--------------------------------------------------------------------------------------------------------------
 
