@@ -70,6 +70,15 @@ namespace Apostol {
 
             TPairs<CStringListPairs> m_Profiles;
 
+            void BeforeRun() override;
+            void AfterRun() override;
+
+            void Authentication();
+            void CheckListen();
+            void InitListen();
+
+            bool InProgress(const CString &MsgId);
+
             void FetchCerts(CProvider &Provider, const CString &Application);
 
             void FetchProviders();
@@ -89,20 +98,10 @@ namespace Apostol {
             static CString CreateToken(const CProvider& Provider, const CString &Application);
             static CString CreateGoogleToken(const CProvider& Provider, const CString &Application);
 
-            void BeforeRun() override;
-            void AfterRun() override;
-
-            bool InProgress(const CString &MsgId);
-
-            void Authentication();
             static void Authorize(CStringList &SQL, const CString &Session, const CString &Username, const CString &Secret);
-
-            void CheckListen();
-            void InitListen();
-
-            static void ExecuteObjectAction(CStringList &SQL, const CString &MsgId, const CString &Action);
             static void SetArea(CStringList &SQL, const CString &Area);
             static void SetObjectLabel(CStringList &SQL, const CString &MsgId, const CString &Label);
+            static void ExecuteObjectAction(CStringList &SQL, const CString &MsgId, const CString &Action);
 
             static void LoadSMTPConfig(const CString &FileName, CSMTPConfigs &Configs);
             CSMTPClient *GetSMTPClient(const CSMTPConfig &Config);
