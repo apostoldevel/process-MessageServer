@@ -761,7 +761,7 @@ namespace Apostol {
                     if (Json.HasOwnProperty("error")) {
                         pMessage->Fail(Json["error"]["message"].AsString());
                     } else {
-                        pMessage->MessageId() = Json["name"].AsString();
+                        pMessage->MsgId() = Json["name"].AsString();
                         pMessage->Done();
                     }
                 }
