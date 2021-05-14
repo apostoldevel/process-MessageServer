@@ -45,11 +45,16 @@ namespace Apostol {
 
         private:
 
+            CProcessStatus m_Status;
+
             CString m_ClientId;
             CString m_ClientSecret;
 
             CString m_Session;
             CString m_Secret;
+
+            CString m_ApiBot;
+            CString m_MailBot;
 
             CString m_Agent;
             CString m_Host;
@@ -97,11 +102,6 @@ namespace Apostol {
 
             static CString CreateToken(const CProvider& Provider, const CString &Application);
             static CString CreateGoogleToken(const CProvider& Provider, const CString &Application);
-
-            static void Authorize(CStringList &SQL, const CString &Session, const CString &Username, const CString &Secret);
-            static void SetArea(CStringList &SQL, const CString &Area);
-            static void SetObjectLabel(CStringList &SQL, const CString &MsgId, const CString &Label);
-            static void ExecuteObjectAction(CStringList &SQL, const CString &MsgId, const CString &Action);
 
             static void LoadSMTPConfig(const CString &FileName, CSMTPConfigs &Configs);
             CSMTPClient *GetSMTPClient(const CSMTPConfig &Config);

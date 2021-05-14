@@ -23,6 +23,7 @@ Author:
 
 #include "Core.hpp"
 #include "MessageServer.hpp"
+#include "BackEnd.hpp"
 //----------------------------------------------------------------------------------------------------------------------
 
 #include "jwt.h"
@@ -36,11 +37,9 @@ Author:
 
 #define CONFIG_SECTION_NAME "process/MessageServer"
 
-#define MAIL_BOT_USERNAME "mailbot"
 #define API_BOT_USERNAME "apibot"
+#define MAIL_BOT_USERNAME "mailbot"
 
-#define QUERY_INDEX_AUTH    0
-#define QUERY_INDEX_SU      1
 #define QUERY_INDEX_MESSAGE 2
 
 extern "C++" {
@@ -61,11 +60,11 @@ namespace Apostol {
             m_Agent = CString().Format("Message Server (%s)", Application()->Title().c_str());
             m_Host = CApostolModule::GetIPByHostName(CApostolModule::GetHostName());
 
-            const auto now = Now();
+            m_AuthDate = 0;
+            m_FixedDate = 0;
+            m_CheckDate = 0;
 
-            m_AuthDate = now;
-            m_FixedDate = now;
-            m_CheckDate = now;
+            m_Status = psStopped;
 
             m_HeartbeatInterval = 5000;
         }
@@ -448,11 +447,9 @@ namespace Apostol {
                 }
             }
 
-            const auto now = Now();
-
-            m_AuthDate = now;
-            m_FixedDate = now;
-            m_CheckDate = now;
+            m_AuthDate = 0;
+            m_FixedDate = 0;
+            m_CheckDate = 0;
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -521,7 +518,12 @@ namespace Apostol {
                     m_Session = Result[0][0]["session"];
                     m_Secret = Result[0][0]["secret"];
 
+                    m_ApiBot = Result[1][0]["get_session"];
+                    m_MailBot = Result[2][0]["get_session"];
+
                     m_AuthDate = Now() + (CDateTime) 24 / HoursPerDay;
+
+                    m_Status = psRunning;
                 } catch (Delphi::Exception::Exception &E) {
                     DoError(E);
                 }
@@ -541,53 +543,15 @@ namespace Apostol {
 
             CStringList SQL;
 
-            SQL.Add(CString().Format("SELECT * FROM api.login(%s, %s, %s, %s);",
-                                     PQQuoteLiteral(m_ClientId).c_str(),
-                                     PQQuoteLiteral(m_ClientSecret).c_str(),
-                                     PQQuoteLiteral(m_Agent).c_str(),
-                                     PQQuoteLiteral(m_Host).c_str()
-            ));
+            api::login(SQL, m_ClientId, m_ClientSecret, m_Agent, m_Host);
+            api::get_session(SQL, API_BOT_USERNAME, m_Agent, m_Host);
+            api::get_session(SQL, MAIL_BOT_USERNAME, m_Agent, m_Host);
 
             try {
                 ExecSQL(SQL, nullptr, OnExecuted, OnException);
             } catch (Delphi::Exception::Exception &E) {
                 DoError(E);
             }
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        void CMessageServer::Authorize(CStringList &SQL, const CString &Session, const CString &Username, const CString &Secret) {
-            SQL.Add(CString().Format("SELECT * FROM api.authorize(%s);",
-                                     PQQuoteLiteral(Session).c_str()
-            ));
-
-            SQL.Add(CString().Format("SELECT * FROM api.su(%s, %s);",
-                                     PQQuoteLiteral(Username).c_str(),
-                                     PQQuoteLiteral(Secret).c_str()
-            ));
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        void CMessageServer::ExecuteObjectAction(CStringList &SQL, const CString &MsgId, const CString &Action) {
-            SQL.Add(CString().Format("SELECT * FROM api.execute_object_action(%s::uuid, %s);",
-                                     PQQuoteLiteral(MsgId).c_str(),
-                                     PQQuoteLiteral(Action).c_str()
-            ));
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        void CMessageServer::SetArea(CStringList &SQL, const CString &Area) {
-            SQL.Add(CString().Format("SELECT * FROM api.set_session_area(%s::uuid);",
-                                     PQQuoteLiteral(Area).c_str()
-            ));
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        void CMessageServer::SetObjectLabel(CStringList &SQL, const CString &MsgId, const CString &Label) {
-            SQL.Add(CString().Format("SELECT * FROM api.set_object_label(%s::uuid, %s);",
-                                     PQQuoteLiteral(MsgId).c_str(),
-                                     PQQuoteLiteral(Label).c_str()
-            ));
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -608,7 +572,7 @@ namespace Apostol {
 
             auto &Message = pSMTPClient->NewMessage();
 
-            Message.MsgId() = id;
+            Message.MessageId() = id;
             Message.From() = from;
             Message.To() = address;
             Message.Subject() = subject;
@@ -660,24 +624,14 @@ namespace Apostol {
                 auto pMessage = dynamic_cast<CMessage *> (pClient->Data().Objects("message"));
                 if (pMessage != nullptr) {
 
-                    const auto& Agent = pClient->Data()["agent"];
-                    const auto& Area = pClient->Data()["area"];
+                    const auto& agent = pClient->Data()["agent"];
+                    const auto& area = pClient->Data()["area"];
 
                     CStringList SQL;
 
-                    Authorize(SQL, m_Session, API_BOT_USERNAME, m_ClientSecret);
-                    SetArea(SQL, Area);
-
-                    SQL.Add(CString()
-                                    .MaxFormatSize(256 + pMessage->MsgId().Size() + Agent.Size() + pMessage->From().Size() + pMessage->To().First().Size() + pMessage->Subject().Size() + pReply->Content.Size())
-                                    .Format("SELECT * FROM api.set_message(null, %s, 'message.inbox', %s, %s, %s, %s, %s);",
-                                             PQQuoteLiteral(pMessage->MsgId()).c_str(),
-                                             PQQuoteLiteral(Agent).c_str(),
-                                             PQQuoteLiteral(pMessage->From()).c_str(),
-                                             PQQuoteLiteral(pMessage->To().First()).c_str(),
-                                             PQQuoteLiteral(pMessage->Subject()).c_str(),
-                                             PQQuoteLiteral(pReply->Content).c_str()
-                    ));
+                    api::authorize(SQL, m_ApiBot);
+                    api::set_session_area(SQL, area);
+                    api::add_inbox(SQL, pMessage->MessageId(), agent, CString(), pMessage->From(), pMessage->To().First(), pMessage->Subject(), pReply->Content);
 
                     try {
                         ExecSQL(SQL);
@@ -717,7 +671,7 @@ namespace Apostol {
 
             auto pMessage = new CMessage();
 
-            pMessage->MsgId() = id;
+            pMessage->MessageId() = id;
             pMessage->From() = profile;
             pMessage->To() = address;
             pMessage->Subject() = subject;
@@ -844,7 +798,7 @@ namespace Apostol {
 
             auto pMessage = new CMessage();
 
-            pMessage->MsgId() = id;
+            pMessage->MessageId() = id;
             pMessage->From() = profile;
             pMessage->To() = address;
             pMessage->Subject() = subject;
@@ -914,24 +868,14 @@ namespace Apostol {
                 auto pMessage = dynamic_cast<CMessage *> (pClient->Data().Objects("message"));
                 if (pMessage != nullptr) {
 
-                    const auto& Agent = pClient->Data()["agent"];
-                    const auto& Area = pClient->Data()["area"];
+                    const auto& agent = pClient->Data()["agent"];
+                    const auto& area = pClient->Data()["area"];
 
                     CStringList SQL;
 
-                    Authorize(SQL, m_Session, API_BOT_USERNAME, m_ClientSecret);
-                    SetArea(SQL, Area);
-
-                    SQL.Add(CString()
-                                    .MaxFormatSize(256 + pMessage->MsgId().Size() + Agent.Size() + pMessage->From().Size() + pMessage->To().First().Size() + pMessage->Subject().Size() + pReply->Content.Size())
-                                    .Format("SELECT * FROM api.set_message(null, %s, 'message.inbox', %s, %s, %s, %s, %s);",
-                                             PQQuoteLiteral(pMessage->MsgId()).c_str(),
-                                             PQQuoteLiteral(Agent).c_str(),
-                                             PQQuoteLiteral(pMessage->From()).c_str(),
-                                             PQQuoteLiteral(pMessage->To().First()).c_str(),
-                                             PQQuoteLiteral(pMessage->Subject()).c_str(),
-                                             PQQuoteLiteral(pReply->Content).c_str()
-                    ));
+                    api::authorize(SQL, m_ApiBot);
+                    api::set_session_area(SQL, area);
+                    api::add_inbox(SQL, pMessage->MessageId(), agent, CString(), pMessage->From(), pMessage->To().First(), pMessage->Subject(), pReply->Content);
 
                     try {
                         ExecSQL(SQL);
@@ -971,7 +915,7 @@ namespace Apostol {
 
             auto pMessage = new CMessage();
 
-            pMessage->MsgId() = id;
+            pMessage->MessageId() = id;
             pMessage->From() = profile;
             pMessage->To() = address;
             pMessage->Subject() = subject;
@@ -1062,24 +1006,14 @@ namespace Apostol {
                 auto pMessage = dynamic_cast<CMessage *> (pClient->Data().Objects("message"));
                 if (pMessage != nullptr) {
 
-                    const auto& Agent = pClient->Data()["agent"];
-                    const auto& Area = pClient->Data()["area"];
+                    const auto& agent = pClient->Data()["agent"];
+                    const auto& area = pClient->Data()["area"];
 
                     CStringList SQL;
 
-                    Authorize(SQL, m_Session, API_BOT_USERNAME, m_ClientSecret);
-                    SetArea(SQL, Area);
-
-                    SQL.Add(CString()
-                                    .MaxFormatSize(256 + pMessage->MsgId().Size() + Agent.Size() + pMessage->From().Size() + pMessage->To().First().Size() + pMessage->Subject().Size() + pReply->Content.Size())
-                                    .Format("SELECT * FROM api.set_message(null, %s, 'message.inbox', %s, %s, %s, %s, %s);",
-                                             PQQuoteLiteral(pMessage->MsgId()).c_str(),
-                                             PQQuoteLiteral(Agent).c_str(),
-                                             PQQuoteLiteral(pMessage->From()).c_str(),
-                                             PQQuoteLiteral(pMessage->To().First()).c_str(),
-                                             PQQuoteLiteral(pMessage->Subject()).c_str(),
-                                             PQQuoteLiteral(pReply->Content).c_str()
-                    ));
+                    api::authorize(SQL, m_ApiBot);
+                    api::set_session_area(SQL, area);
+                    api::add_inbox(SQL, pMessage->MessageId(), agent, CString(), pMessage->From(), pMessage->To().First(), pMessage->Subject(), pReply->Content);
 
                     try {
                         ExecSQL(SQL);
@@ -1119,7 +1053,7 @@ namespace Apostol {
 
             auto pMessage = new CMessage();
 
-            pMessage->MsgId() = id;
+            pMessage->MessageId() = id;
             pMessage->From() = profile;
             pMessage->To() = address;
             pMessage->Subject() = subject;
@@ -1215,9 +1149,9 @@ namespace Apostol {
 
             CStringList SQL;
 
-            Authorize(SQL, m_Session, MAIL_BOT_USERNAME, m_ClientSecret);
-
-            SQL.Add("SELECT * FROM api.outbox('prepared') ORDER BY created;");
+            api::authorize(SQL, m_MailBot);
+            api::set_area(SQL, "all");
+            api::outbox(SQL, "prepared");
 
             try {
                 ExecSQL(SQL, nullptr, OnExecuted, OnException);
@@ -1233,8 +1167,10 @@ namespace Apostol {
             m_Session.Clear();
             m_Secret.Clear();
 
-            m_AuthDate = now + (CDateTime) m_HeartbeatInterval / MSecsPerDay;
-            m_CheckDate = now + (CDateTime) m_HeartbeatInterval * 2 / MSecsPerDay;
+            m_AuthDate = 0;
+            m_CheckDate = 0;
+
+            m_Status = psStopped;
 
             Log()->Error(APP_LOG_ERR, 0, "%s", E.what());
         }
@@ -1251,10 +1187,11 @@ namespace Apostol {
             }
 
             if ((now >= m_AuthDate)) {
+                m_AuthDate = now + (CDateTime) 5 / SecsPerDay; // 5 sec
                 Authentication();
             }
 
-            if (!m_Session.IsEmpty()) {
+            if (m_Status == psRunning) {
                 if ((now >= m_CheckDate)) {
                     m_CheckDate = now + (CDateTime) 5 / MinsPerDay; // 5 min
                     CheckOutbox();
@@ -1280,10 +1217,10 @@ namespace Apostol {
         void CMessageServer::DoSend(const CMessage &Message) {
             CStringList SQL;
 
-            Authorize(SQL, m_Session, MAIL_BOT_USERNAME, m_ClientSecret);
-            ExecuteObjectAction(SQL, Message.MsgId(), "send");
+            api::authorize(SQL, m_MailBot);
+            api::execute_object_action(SQL, Message.MessageId(), "send");
 
-            Log()->Message("[%s] Message sending.", Message.MsgId().c_str());
+            Log()->Message("[%s] Message sending.", Message.MessageId().c_str());
 
             try {
                 ExecSQL(SQL);
@@ -1296,11 +1233,11 @@ namespace Apostol {
         void CMessageServer::DoCancel(const CMessage &Message, const CString &Error) {
             CStringList SQL;
 
-            Authorize(SQL, m_Session, MAIL_BOT_USERNAME, m_ClientSecret);
-            ExecuteObjectAction(SQL, Message.MsgId(), "cancel");
-            SetObjectLabel(SQL, Message.MsgId(), Error);
+            api::authorize(SQL, m_MailBot);
+            api::execute_object_action(SQL, Message.MessageId(), "cancel");
+            api::set_object_label(SQL, Message.MessageId(), Error);
 
-            Log()->Message("[%s] Sent message canceled.", Message.MsgId().c_str());
+            Log()->Message("[%s] Sent message canceled.", Message.MessageId().c_str());
 
             try {
                 ExecSQL(SQL);
@@ -1313,12 +1250,12 @@ namespace Apostol {
         void CMessageServer::DoDone(const CMessage &Message) {
             CStringList SQL;
 
-            Authorize(SQL, m_Session, MAIL_BOT_USERNAME, m_ClientSecret);
-            ExecuteObjectAction(SQL, Message.MsgId(), "done");
-            if (!Message.MessageId().IsEmpty())
-                SetObjectLabel(SQL, Message.MsgId(), Message.MessageId());
+            api::authorize(SQL, m_MailBot);
+            api::execute_object_action(SQL, Message.MessageId(), "done");
+            if (!Message.MsgId().IsEmpty())
+                api::set_object_label(SQL, Message.MessageId(), Message.MsgId());
 
-            Log()->Message("[%s] Message sent successfully.", Message.MsgId().c_str());
+            Log()->Message("[%s] Message sent successfully.", Message.MessageId().c_str());
 
             try {
                 ExecSQL(SQL);
@@ -1331,11 +1268,11 @@ namespace Apostol {
         void CMessageServer::DoFail(const CMessage &Message, const CString &Error) {
             CStringList SQL;
 
-            Authorize(SQL, m_Session, MAIL_BOT_USERNAME, m_ClientSecret);
-            ExecuteObjectAction(SQL, Message.MsgId(), "fail");
-            SetObjectLabel(SQL, Message.MsgId(), Error);
+            api::authorize(SQL, m_MailBot);
+            api::execute_object_action(SQL, Message.MessageId(), "fail");
+            api::set_object_label(SQL, Message.MessageId(), Error);
 
-            Log()->Message("[%s] Message was not sent.", Message.MsgId().c_str());
+            Log()->Message("[%s] Message was not sent.", Message.MessageId().c_str());
 
             try {
                 ExecSQL(SQL);
@@ -1412,10 +1349,10 @@ namespace Apostol {
 
             CStringList SQL;
 
-            Authorize(SQL, m_Session, MAIL_BOT_USERNAME, m_ClientSecret);
+            api::authorize(SQL, m_MailBot);
             for (int i = 0; i < pClient->Messages().Count(); ++i) {
                 const auto& Message = pClient->Messages()[i];
-                SetObjectLabel(SQL, Message.MsgId(), E.what());
+                api::set_object_label(SQL, Message.MessageId(), E.what());
             }
 
             Log()->Error(APP_LOG_ERR, 0, "%s", E.what());
@@ -1455,9 +1392,9 @@ namespace Apostol {
 #endif
             CStringList SQL;
 
-            Authorize(SQL, m_Session, MAIL_BOT_USERNAME, m_ClientSecret);
-
-            SQL.Add(CString().Format("SELECT * FROM api.get_message('%s');", ANotify->extra));
+            api::authorize(SQL, m_MailBot);
+            api::set_area(SQL, "all");
+            api::get_message(SQL, ANotify->extra);
 
             try {
                 ExecSQL(SQL, nullptr, OnExecuted, OnException);
