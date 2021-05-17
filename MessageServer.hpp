@@ -63,8 +63,6 @@ namespace Apostol {
 
             CSMTPConfigs m_Configs;
 
-            int m_HeartbeatInterval;
-
             CDateTime m_AuthDate;
             CDateTime m_FixedDate;
             CDateTime m_CheckDate;
