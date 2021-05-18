@@ -40,7 +40,7 @@ Author:
 #define API_BOT_USERNAME "apibot"
 #define MAIL_BOT_USERNAME "mailbot"
 
-#define QUERY_INDEX_MESSAGE 2
+#define QUERY_INDEX_MESSAGE 1
 
 extern "C++" {
 
@@ -1148,7 +1148,6 @@ namespace Apostol {
             CStringList SQL;
 
             api::authorize(SQL, m_MailBot);
-            api::set_area(SQL, "all");
             api::outbox(SQL, "prepared");
 
             try {
@@ -1391,7 +1390,6 @@ namespace Apostol {
             CStringList SQL;
 
             api::authorize(SQL, m_MailBot);
-            api::set_area(SQL, "all");
             api::get_message(SQL, ANotify->extra);
 
             try {
