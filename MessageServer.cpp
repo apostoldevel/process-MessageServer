@@ -23,7 +23,6 @@ Author:
 
 #include "Core.hpp"
 #include "MessageServer.hpp"
-#include "BackEnd.hpp"
 //----------------------------------------------------------------------------------------------------------------------
 
 #include "jwt.h"
@@ -507,17 +506,17 @@ namespace Apostol {
 
             auto OnExecuted = [this](CPQPollQuery *APollQuery) {
 
-                CPQueryResults Result;
+                CPQueryResults pqResults;
                 CStringList SQL;
 
                 try {
-                    CApostolModule::QueryToResults(APollQuery, Result);
+                    CApostolModule::QueryToResults(APollQuery, pqResults);
 
-                    m_Session = Result[0][0]["session"];
-                    m_Secret = Result[0][0]["secret"];
+                    m_Session = pqResults[0][0]["session"];
+                    m_Secret = pqResults[0][0]["secret"];
 
-                    m_ApiBot = Result[1][0]["get_session"];
-                    m_MailBot = Result[2][0]["get_session"];
+                    m_ApiBot = pqResults[1][0]["get_session"];
+                    m_MailBot = pqResults[2][0]["get_session"];
 
                     m_AuthDate = Now() + (CDateTime) 24 / HoursPerDay;
 
@@ -1130,12 +1129,12 @@ namespace Apostol {
 
             auto OnExecuted = [this](CPQPollQuery *APollQuery) {
 
-                CPQueryResults Results;
+                CPQueryResults pqResults;
                 CStringList SQL;
 
                 try {
-                    CApostolModule::QueryToResults(APollQuery, Results);
-                    CheckMessages(Results[QUERY_INDEX_MESSAGE]);
+                    CApostolModule::QueryToResults(APollQuery, pqResults);
+                    CheckMessages(pqResults[QUERY_INDEX_MESSAGE]);
                 } catch (Delphi::Exception::Exception &E) {
                     DoError(E);
                 }
@@ -1366,12 +1365,12 @@ namespace Apostol {
 
             auto OnExecuted = [this](CPQPollQuery *APollQuery) {
 
-                CPQueryResults Results;
+                CPQueryResults pqResults;
                 CStringList SQL;
 
                 try {
-                    CApostolModule::QueryToResults(APollQuery, Results);
-                    CheckMessages(Results[QUERY_INDEX_MESSAGE]);
+                    CApostolModule::QueryToResults(APollQuery, pqResults);
+                    CheckMessages(pqResults[QUERY_INDEX_MESSAGE]);
                 } catch (Delphi::Exception::Exception &E) {
                     DoError(E);
                 }
