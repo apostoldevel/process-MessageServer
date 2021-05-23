@@ -413,11 +413,11 @@ namespace Apostol {
             m_Providers.Clear();
             m_Profiles.Clear();
 
-            CStringList configs;
-            Config()->IniFile().ReadSection(CONFIG_SECTION_NAME, &configs);
+            CStringList Configs;
+            Config()->IniFile().ReadSection(CONFIG_SECTION_NAME, &Configs);
 
-            for (int i = 0; i < configs.Count(); ++i) {
-                const auto& config = configs[i].Lower();
+            for (int i = 0; i < Configs.Count(); ++i) {
+                const auto& config = Configs[i].Lower();
 
                 if (config == "enable")
                     continue;
