@@ -653,7 +653,9 @@ namespace Apostol {
 
                 DebugReply(pConnection->Reply());
 
-                Log()->Error(APP_LOG_ERR, 0, "[%s:%d] %s", pClient->Host().c_str(), pClient->Port(), E.what());
+                const auto& host = pClient->Host();
+
+                Log()->Error(APP_LOG_ERR, 0, "[%s:%d] %s", host.empty() ? "null" : host.c_str(), pClient->Port(), E.what());
             };
 
             const auto &id = Record.Values("id");
