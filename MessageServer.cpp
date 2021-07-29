@@ -1119,7 +1119,7 @@ namespace Apostol {
                         SendM2M(Record, m_Profiles["m2m"]);
                     } else if (agent == "sba.agent") {
                         SendSBA(Record, m_Profiles["sba"]);
-                    } else {
+                    } else if (agent != "bm.agent") {
                         SendAPI(Record, m_Profiles["api"]);
                     }
                 }
