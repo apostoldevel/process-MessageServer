@@ -758,7 +758,12 @@ namespace Apostol {
                     const CJSON Json(pReply->Content);
 
                     if (Json.HasOwnProperty("error")) {
-                        pMessage->Fail(Json["error"]["message"].AsString());
+                        const auto& error = Json["error"];
+                        const auto& code = error["code"].AsInteger();
+                        const auto& message = error["message"].AsString();
+                        const auto& status = error["status"].AsString();
+
+                        pMessage->Fail(CString().Format("[%d] %s: %s", code, status.c_str(), message.c_str()));
                     } else {
                         pMessage->MsgId() = Json["name"].AsString();
                         pMessage->Done();
