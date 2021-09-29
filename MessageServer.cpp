@@ -1106,39 +1106,28 @@ namespace Apostol {
 
         void CMessageServer::CheckMessages(const CPQueryResult& Messages) {
 
-            const auto max = Config()->PostgresPollMax();
-            const size_t count = Messages.Count() > max ? max : Messages.Count();
+            for (int i = 0; i < Messages.Count(); ++i) {
 
-            int prepared = 0;
+                const auto &record = Messages[i];
 
-            for (int i = 0; i < count; ++i) {
-
-                const auto &caRecord = Messages[i];
-
-                const auto &type = caRecord.Values("agenttypecode");
-                const auto &agent = caRecord.Values("agentcode");
+                const auto &type = record.Values("agenttypecode");
+                const auto &agent = record.Values("agentcode");
 
                 if (type == "email.agent") {
                     if (agent == "smtp.agent") {
-                        SendSMTP(caRecord);
+                        SendSMTP(record);
                     }
                 } else if (type == "api.agent") {
                     if (agent == "fcm.agent") {
-                        SendFCM(caRecord, m_Profiles["fcm"]);
+                        SendFCM(record, m_Profiles["fcm"]);
                     } else if (agent == "m2m.agent") {
-                        SendM2M(caRecord, m_Profiles["m2m"]);
+                        SendM2M(record, m_Profiles["m2m"]);
                     } else if (agent == "sba.agent") {
-                        SendSBA(caRecord, m_Profiles["sba"]);
+                        SendSBA(record, m_Profiles["sba"]);
                     } else if (agent != "bm.agent") {
-                        SendAPI(caRecord, m_Profiles["api"]);
+                        SendAPI(record, m_Profiles["api"]);
                     }
                 }
-
-                prepared++;
-            }
-
-            if (Messages.Count() > prepared) {
-                m_CheckDate = 0;
             }
         }
         //--------------------------------------------------------------------------------------------------------------
@@ -1299,11 +1288,11 @@ namespace Apostol {
         void CMessageServer::DoSMTPConnected(CObject *Sender) {
             auto pConnection = dynamic_cast<CSMTPConnection *>(Sender);
             if (Assigned(pConnection)) {
-//                auto pClient = dynamic_cast<CSMTPClient *> (pConnection->Client());
-//                if (Assigned(pClient)) {
-//                    for (int i = 0; i < pClient->Messages().Count(); ++i)
-//                        DoSend(pClient->Messages()[i]);
-//                }
+                auto pClient = dynamic_cast<CSMTPClient *> (pConnection->Client());
+                if (Assigned(pClient)) {
+                    for (int i = 0; i < pClient->Messages().Count(); ++i)
+                        DoSend(pClient->Messages()[i]);
+                }
                 Log()->Message(_T("[%s:%d] SMTP client connected."), pConnection->Socket()->Binding()->PeerIP(),
                                pConnection->Socket()->Binding()->PeerPort());
             }
@@ -1381,22 +1370,22 @@ namespace Apostol {
 
         void CMessageServer::DoPostgresNotify(CPQConnection *AConnection, PGnotify *ANotify) {
 
-//            auto OnExecuted = [this](CPQPollQuery *APollQuery) {
-//
-//                CPQueryResults pqResults;
-//                CStringList SQL;
-//
-//                try {
-//                    CApostolModule::QueryToResults(APollQuery, pqResults);
-//                    CheckMessages(pqResults[QUERY_INDEX_MESSAGE]);
-//                } catch (Delphi::Exception::Exception &E) {
-//                    DoError(E);
-//                }
-//            };
-//
-//            auto OnException = [this](CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
-//                DoError(E);
-//            };
+            auto OnExecuted = [this](CPQPollQuery *APollQuery) {
+
+                CPQueryResults pqResults;
+                CStringList SQL;
+
+                try {
+                    CApostolModule::QueryToResults(APollQuery, pqResults);
+                    CheckMessages(pqResults[QUERY_INDEX_MESSAGE]);
+                } catch (Delphi::Exception::Exception &E) {
+                    DoError(E);
+                }
+            };
+
+            auto OnException = [this](CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
+                DoError(E);
+            };
 #ifdef _DEBUG
             const auto& caInfo = AConnection->ConnInfo();
 
@@ -1404,18 +1393,16 @@ namespace Apostol {
                          AConnection->Socket(), caInfo["user"].c_str(), caInfo["host"].c_str(), caInfo["port"].c_str(), caInfo["dbname"].c_str(),
                          ANotify->be_pid, ANotify->relname, ANotify->extra);
 #endif
-            m_CheckDate = 0;
+            CStringList SQL;
 
-//            CStringList SQL;
-//
-//            api::authorize(SQL, m_MailBot);
-//            api::get_message(SQL, ANotify->extra);
-//
-//            try {
-//                ExecSQL(SQL, nullptr, OnExecuted, OnException);
-//            } catch (Delphi::Exception::Exception &E) {
-//                DoError(E);
-//            }
+            api::authorize(SQL, m_MailBot);
+            api::get_message(SQL, ANotify->extra);
+
+            try {
+                ExecSQL(SQL, nullptr, OnExecuted, OnException);
+            } catch (Delphi::Exception::Exception &E) {
+                DoError(E);
+            }
         }
         //--------------------------------------------------------------------------------------------------------------
 
