@@ -984,13 +984,13 @@ namespace Apostol {
         void CMessageServer::DoAPIConnected(CObject *Sender) {
             auto pConnection = dynamic_cast<CHTTPClientConnection *>(Sender);
             if (Assigned(pConnection)) {
-                auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
-                if (Assigned(pClient)) {
-                    auto pMessage = dynamic_cast<CMessage *> (pClient->Data().Objects("message"));
-                    if (Assigned(pMessage)) {
-                        DoSend(*pMessage);
-                    }
-                }
+//                auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
+//                if (Assigned(pClient)) {
+//                    auto pMessage = dynamic_cast<CMessage *> (pClient->Data().Objects("message"));
+//                    if (Assigned(pMessage)) {
+//                        DoSend(*pMessage);
+//                    }
+//                }
                 Log()->Message(_T("[%s:%d] API client connected."), pConnection->Socket()->Binding()->PeerIP(),
                                pConnection->Socket()->Binding()->PeerPort());
             }
