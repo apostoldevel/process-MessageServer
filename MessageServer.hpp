@@ -31,6 +31,53 @@ namespace Apostol {
 
     namespace Processes {
 
+        class CMessageHandler;
+
+        typedef std::function<void (CMessageHandler *Handler)> COnMessageHandlerEvent;
+
+        //--------------------------------------------------------------------------------------------------------------
+
+        //-- CMessageHandler -------------------------------------------------------------------------------------------
+
+        //--------------------------------------------------------------------------------------------------------------
+
+        class CMessageServer;
+        //--------------------------------------------------------------------------------------------------------------
+
+        class CMessageHandler: public CPollConnection {
+        private:
+
+            CMessageServer *m_pServer;
+
+            CString m_MessageId {};
+
+            bool m_Allow;
+
+            COnMessageHandlerEvent m_Handler;
+
+            int AddToQueue();
+            void RemoveFromQueue();
+
+        protected:
+
+            void SetAllow(bool Value) { m_Allow = Value; }
+
+        public:
+
+            CMessageHandler(CMessageServer *AServer, const CString &MessageId, COnMessageHandlerEvent && Handler);
+
+            ~CMessageHandler();
+
+            const CString &MessageId() const { return m_MessageId; }
+
+            bool Allow() const { return m_Allow; };
+            void Allow(bool Value) { SetAllow(Value); };
+
+            bool Handler();
+
+            void Close() override;
+        };
+
         //--------------------------------------------------------------------------------------------------------------
 
         //-- CMessageServer --------------------------------------------------------------------------------------------
@@ -38,6 +85,7 @@ namespace Apostol {
         //--------------------------------------------------------------------------------------------------------------
 
         typedef TPairs<CSMTPConfig> CSMTPConfigs;
+        typedef CPollManager CQueueManager;
         //--------------------------------------------------------------------------------------------------------------
 
         class CMessageServer: public CProcessCustom {
@@ -58,6 +106,12 @@ namespace Apostol {
 
             CString m_Agent;
             CString m_Host;
+
+            /// Message in progress send...
+            CStringList m_Progress;
+
+            CQueue m_Queue;
+            CQueueManager m_QueueManager;
 
             CProviders m_Providers;
 
@@ -80,7 +134,10 @@ namespace Apostol {
             void CheckListen();
             void InitListen();
 
-            bool InProgress(const CString &MsgId);
+            bool InQueue(const CString &MessageId);
+            int IndexOfMessage(const CString &MessageId);
+
+            CMessageHandler *GetMessageHandler(const CString &MessageId);
 
             void FetchCerts(CProvider &Provider, const CString &Application);
 
@@ -88,23 +145,15 @@ namespace Apostol {
             void CheckProviders();
 
             void CheckOutbox();
-            void CheckMessages(const CPQueryResult& Messages);
+            void UnloadMessageQueue();
 
-            void SendSMTP(const CStringPairs &Record);
-            void SendAPI(const CStringPairs &Record, const CStringListPairs &Config);
-            void SendFCM(const CStringPairs &Record, const CStringListPairs &Config);
-            void SendM2M(const CStringPairs &Record, const CStringListPairs &Config);
-            void SendSBA(const CStringPairs &Record, const CStringListPairs &Config);
+            void SendMessage(const TPairs<CString>& Message);
+            void SendMessages(const CPQueryResult& Messages);
 
             void CreateAccessToken(const CProvider &Provider, const CString &Application, CStringList &Tokens);
 
-            static CString CreateToken(const CProvider& Provider, const CString &Application);
-            static CString CreateGoogleToken(const CProvider& Provider, const CString &Application);
-
-            static void LoadSMTPConfig(const CString &FileName, CSMTPConfigs &Configs);
             CSMTPClient *GetSMTPClient(const CSMTPConfig &Config);
 
-            static void InitSMTPConfig(const CIniFile &IniFile, const CString &Section, CSMTPConfig &Config);
             static void InitConfig(const CIniFile &IniFile, const CString &Profile, CStringList &Config);
 
         protected:
@@ -116,6 +165,8 @@ namespace Apostol {
 
             void DoSend(const CMessage &Message);
             void DoDone(const CMessage &Message);
+
+            void DoMessage(CMessageHandler *AHandler);
 
             void DoCancel(const CMessage &Message, const CString &Error);
             void DoFail(const CMessage &Message, const CString &Error);
@@ -146,6 +197,18 @@ namespace Apostol {
             static class CMessageServer *CreateProcess(CCustomProcess *AParent, CApplication *AApplication) {
                 return new CMessageServer(AParent, AApplication);
             }
+
+            int AddProgress(const CString &MessageId);
+            void DeleteProgress(const CString &MessageId);
+
+            CStringList &Progress() { return m_Progress; }
+            const CStringList &Progress() const { return m_Progress; }
+
+            CQueue &Queue() { return m_Queue; }
+            const CQueue &Queue() const { return m_Queue; }
+
+            CPollManager &QueueManager() { return m_QueueManager; }
+            const CPollManager &QueueManager() const { return m_QueueManager; }
 
             void Run() override;
             void Reload() override;
