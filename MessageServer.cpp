@@ -578,7 +578,7 @@ namespace Apostol {
             };
             //----------------------------------------------------------------------------------------------------------
 
-            auto OnFail = [this](const CMessage &Message, auto &&Error) {
+            auto OnFail = [this](const CMessage &Message, const CString &Error) {
                 DeleteProgress(Message.MessageId());
                 DoFail(Message, Error);
             };
