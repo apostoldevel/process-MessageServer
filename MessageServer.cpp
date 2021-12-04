@@ -29,9 +29,9 @@ Author:
 #define CONFIG_SECTION_NAME "process/MessageServer"
 
 #define API_BOT_USERNAME "apibot"
-#define MAIL_BOT_USERNAME "mailbot"
 
-#define QUERY_INDEX_DATA 1
+#define QUERY_INDEX_AUTH     0
+#define QUERY_INDEX_DATA     1
 
 #define MAX_MESSAGES_WITHOUT_QUEUE 5
 
@@ -49,9 +49,10 @@ namespace Apostol {
 
         //--------------------------------------------------------------------------------------------------------------
 
-        CMessageHandler::CMessageHandler(CMessageServer *AServer, const CString &MessageId,
+        CMessageHandler::CMessageHandler(CMessageServer *AServer, const CString &Session, const CString &MessageId,
                 COnMessageHandlerEvent &&Handler): CPollConnection(&AServer->QueueManager()), m_Allow(true) {
             m_pServer = AServer;
+            m_Session = Session;
             m_MessageId = MessageId;
             m_Handler = Handler;
             AddToQueue();
@@ -140,12 +141,9 @@ namespace Apostol {
 
                 Log()->Debug(APP_LOG_DEBUG_EVENT, _T("message server cycle"));
 
-                try
-                {
+                try {
                     PQServer().Wait();
-                }
-                catch (Delphi::Exception::Exception &E)
-                {
+                } catch (Delphi::Exception::Exception &E) {
                     Log()->Error(APP_LOG_ERR, 0, "%s", E.what());
                 }
 
@@ -155,8 +153,6 @@ namespace Apostol {
                         Log()->Debug(APP_LOG_DEBUG_EVENT, _T("gracefully shutting down"));
                         Application()->Header(_T("message server is shutting down"));
                     }
-
-                    //DoExit();
 
                     if (!sig_exiting) {
                         sig_exiting = 1;
@@ -446,7 +442,7 @@ namespace Apostol {
                 }
             }
 
-            Log()->Message("[%s] Reload success", CONFIG_SECTION_NAME);
+            Log()->Notice("[%s] Successful reloading", CONFIG_SECTION_NAME);
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -512,11 +508,21 @@ namespace Apostol {
                 try {
                     CApostolModule::QueryToResults(APollQuery, pqResults);
 
-                    m_Session = pqResults[0][0]["session"];
-                    m_Secret = pqResults[0][0]["secret"];
+                    const auto &login = pqResults[0];
+                    const auto &sessions = pqResults[1];
 
-                    m_ApiBot = pqResults[1][0]["get_session"];
-                    m_MailBot = pqResults[2][0]["get_session"];
+                    const CString oldSession(m_Session);
+
+                    m_Session = login.First()["session"];
+                    m_Secret = login.First()["secret"];
+
+                    for (int i = 0; i < sessions.Count(); ++i) {
+                        m_Sessions.Add(sessions[i]["get_sessions"]);
+                    }
+
+                    if (!oldSession.IsEmpty()) {
+                        SignOut(oldSession);
+                    }
 
                     m_AuthDate = Now() + (CDateTime) 24 / HoursPerDay;
 
@@ -541,8 +547,7 @@ namespace Apostol {
             CStringList SQL;
 
             api::login(SQL, m_ClientId, m_ClientSecret, m_Agent, m_Host);
-            api::get_session(SQL, API_BOT_USERNAME, m_Agent, m_Host);
-            api::get_session(SQL, MAIL_BOT_USERNAME, m_Agent, m_Host);
+            api::get_sessions(SQL, API_BOT_USERNAME, m_Agent, m_Host);
 
             try {
                 ExecSQL(SQL, nullptr, OnExecuted, OnException);
@@ -552,10 +557,25 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::SendMessage(const TPairs<CString> &Message) {
+        void CMessageServer::SignOut(const CString &Session) {
+            CStringList SQL;
 
-            auto OnSMTPClient = [this](const CSMTPConfig &Config) {
-                return GetSMTPClient(Config);
+            api::signout(SQL, Session);
+
+            try {
+                ExecSQL(SQL);
+            } catch (Delphi::Exception::Exception &E) {
+                DoError(E);
+            }
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CMessageServer::SendMessage(const CString &Session, const TPairs<CString> &Message) {
+
+            auto OnSMTPClient = [this, &Session](const CSMTPConfig &Config) {
+                auto pClient = GetSMTPClient(Config);
+                pClient->Data().AddPair("session", Session);
+                return pClient;
             };
             //----------------------------------------------------------------------------------------------------------
 
@@ -572,15 +592,15 @@ namespace Apostol {
             };
             //----------------------------------------------------------------------------------------------------------
 
-            auto OnDone = [this](const CMessage &Message) {
+            auto OnDone = [this, &Session](const CMessage &Message) {
                 DeleteProgress(Message.MessageId());
-                DoDone(Message);
+                DoDone(Session, Message);
             };
             //----------------------------------------------------------------------------------------------------------
 
-            auto OnFail = [this](const CMessage &Message, const CString &Error) {
+            auto OnFail = [this, &Session](const CMessage &Message, const CString &Error) {
                 DeleteProgress(Message.MessageId());
-                DoFail(Message, Error);
+                DoFail(Session, Message, Error);
             };
             //----------------------------------------------------------------------------------------------------------
 
@@ -614,7 +634,7 @@ namespace Apostol {
             };
             //----------------------------------------------------------------------------------------------------------
 
-            auto OnAPIExecute = [this](CTCPConnection *Sender) {
+            auto OnAPIExecute = [this, &Session](CTCPConnection *Sender) {
 
                 auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
                 auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
@@ -631,7 +651,7 @@ namespace Apostol {
 
                     CStringList SQL;
 
-                    api::authorize(SQL, m_ApiBot);
+                    api::authorize(SQL, Session);
                     api::set_session_area(SQL, area);
                     api::add_inbox(SQL, pMessage->MessageId(), agent, CString(), pMessage->From(), pMessage->To().First(), pMessage->Subject(), pReply->Content);
 
@@ -680,30 +700,26 @@ namespace Apostol {
             } else if (type == "api.agent") {
                 if (agent == "fcm.agent") {
                     Connectors::CFCMConnector::Send(Message, m_Profiles["fcm"], m_Tokens, OnHTTPClient, OnFCMExecute, OnException, OnDone, OnFail);
-//                    SendFCM(Message, m_Profiles["fcm"]);
                 } else if (agent == "m2m.agent") {
                     Connectors::CM2MConnector::Send(Message, m_Profiles["m2m"], m_Tokens, OnHTTPClient, OnAPIExecute, OnException, OnDone, OnFail);
-//                    SendM2M(Message, m_Profiles["m2m"]);
                 } else if (agent == "sba.agent") {
                     Connectors::CSBAConnector::Send(Message, m_Profiles["sba"], m_Tokens, OnHTTPClient, OnAPIExecute, OnException, OnDone, OnFail);
-//                    SendSBA(Message, m_Profiles["sba"]);
                 } else if (agent != "bm.agent") {
                     Connectors::CAPIConnector::Send(Message, m_Profiles["api"], m_Tokens, OnHTTPClient, OnAPIExecute, OnException, OnDone, OnFail);
-//                    SendAPI(Message, m_Profiles["api"]);
                 }
             }
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::SendMessages(const CPQueryResult& Messages) {
+        void CMessageServer::SendMessages(const CString &Session, const CPQueryResult& Messages) {
             for (int i = 0; i < Messages.Count(); ++i) {
                 const auto &message = Messages[i];
                 const auto &id = message["id"];
                 if (!InQueue(id)) {
 #if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
-                    new CMessageHandler(this, id, [this](auto &&Id) { DoMessage(Id); });
+                    new CMessageHandler(this, Session, id, [this](auto &&Id) { DoMessage(Id); });
 #else
-                    new CMessageHandler(this, id, std::bind(&CMessageServer::DoMessage, this, _1));
+                    new CMessageHandler(this, Session, id, std::bind(&CMessageServer::DoMessage, this, _1));
 #endif
                 }
             }
@@ -718,9 +734,17 @@ namespace Apostol {
                 CPQueryResults pqResults;
                 CStringList SQL;
 
+                const auto &session = APollQuery->Data()["session"];
+
                 try {
                     CApostolModule::QueryToResults(APollQuery, pqResults);
-                    SendMessages(pqResults[QUERY_INDEX_DATA]);
+
+                    const auto &authorize = pqResults[QUERY_INDEX_AUTH].First();
+
+                    if (authorize["authorized"] != "t")
+                        throw Delphi::Exception::ExceptionFrm("Authorization failed: %s", authorize["message"].c_str());
+
+                    SendMessages(session, pqResults[QUERY_INDEX_DATA]);
                 } catch (Delphi::Exception::Exception &E) {
                     DoError(E);
                 }
@@ -730,15 +754,20 @@ namespace Apostol {
                 DoError(E);
             };
 
-            CStringList SQL;
+            for (int i = 0; i < m_Sessions.Count(); ++i) {
+                const auto &session = m_Sessions[i];
 
-            api::authorize(SQL, m_MailBot);
-            api::outbox(SQL, "prepared");
+                CStringList SQL;
 
-            try {
-                ExecSQL(SQL, nullptr, OnExecuted, OnException);
-            } catch (Delphi::Exception::Exception &E) {
-                DoError(E);
+                api::authorize(SQL, session);
+                api::outbox(SQL, "prepared");
+
+                try {
+                    auto pQuery = ExecSQL(SQL, nullptr, OnExecuted, OnException);
+                    pQuery->Data().AddPair("session", session);
+                } catch (Delphi::Exception::Exception &E) {
+                    DoError(E);
+                }
             }
         }
         //--------------------------------------------------------------------------------------------------------------
@@ -760,6 +789,7 @@ namespace Apostol {
         void CMessageServer::DoError(const Delphi::Exception::Exception &E) {
             m_Session.Clear();
             m_Secret.Clear();
+            m_Sessions.Clear();
 
             m_AuthDate = Now() + (CDateTime) SLEEP_SECOND_AFTER_ERROR / SecsPerDay; // 10 sec;
             m_CheckDate = m_AuthDate;
@@ -767,7 +797,7 @@ namespace Apostol {
             m_Status = psStopped;
 
             Log()->Error(APP_LOG_ERR, 0, "%s", E.what());
-            Log()->Message("Continue after %d seconds", SLEEP_SECOND_AFTER_ERROR);
+            Log()->Notice("Continue after %d seconds", SLEEP_SECOND_AFTER_ERROR);
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -810,8 +840,8 @@ namespace Apostol {
                 try {
                     CApostolModule::QueryToResults(APollQuery, pqResults);
                     const auto &messages = pqResults[QUERY_INDEX_DATA];
-                    if (messages.Count() > 0) {
-                        SendMessage(messages[0]);
+                    for (int i = 0; i < messages.Count(); ++i) {
+                        SendMessage(pHandler->Session(), messages[i]);
                     }
                 } catch (Delphi::Exception::Exception &E) {
                     DeleteProgress(pHandler->MessageId());
@@ -834,8 +864,8 @@ namespace Apostol {
 
             CStringList SQL;
 
-            api::authorize(SQL, m_MailBot);
-            api::get_message(SQL, AHandler->MessageId());
+            api::authorize(SQL, AHandler->Session());
+            api::get_service_message(SQL, AHandler->MessageId());
 
             try {
                 ExecSQL(SQL, AHandler, OnExecuted, OnException);
@@ -863,10 +893,10 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::DoSend(const CMessage &Message) {
+        void CMessageServer::DoSend(const CString &Session, const CMessage &Message) {
             CStringList SQL;
 
-            api::authorize(SQL, m_MailBot);
+            api::authorize(SQL, Session);
             api::execute_object_action(SQL, Message.MessageId(), "send");
 
             Log()->Message("[%s] Message sending...", Message.MessageId().c_str());
@@ -879,10 +909,10 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::DoCancel(const CMessage &Message, const CString &Error) {
+        void CMessageServer::DoCancel(const CString &Session, const CMessage &Message, const CString &Error) {
             CStringList SQL;
 
-            api::authorize(SQL, m_MailBot);
+            api::authorize(SQL, Session);
             api::execute_object_action(SQL, Message.MessageId(), "cancel");
             api::set_object_label(SQL, Message.MessageId(), Error);
 
@@ -896,7 +926,7 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::DoDone(const CMessage &Message) {
+        void CMessageServer::DoDone(const CString &Session, const CMessage &Message) {
 
             auto OnExecuted = [this](CPQPollQuery *APollQuery) {
                 delete APollQuery->Binding();
@@ -910,7 +940,7 @@ namespace Apostol {
 
             CStringList SQL;
 
-            api::authorize(SQL, m_MailBot);
+            api::authorize(SQL, Session);
             api::execute_object_action(SQL, Message.MessageId(), "done");
 
             if (!Message.MsgId().IsEmpty())
@@ -926,7 +956,7 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::DoFail(const CMessage &Message, const CString &Error) {
+        void CMessageServer::DoFail(const CString &Session, const CMessage &Message, const CString &Error) {
 
             auto OnExecuted = [this](CPQPollQuery *APollQuery) {
                 delete APollQuery->Binding();
@@ -940,7 +970,7 @@ namespace Apostol {
 
             CStringList SQL;
 
-            api::authorize(SQL, m_MailBot);
+            api::authorize(SQL, Session);
             api::execute_object_action(SQL, Message.MessageId(), "fail");
             api::set_object_label(SQL, Message.MessageId(), Error);
 
@@ -959,8 +989,9 @@ namespace Apostol {
             if (Assigned(pConnection)) {
                 auto pClient = dynamic_cast<CSMTPClient *> (pConnection->Client());
                 if (Assigned(pClient)) {
+                    const auto &session = pClient->Data()["session"];
                     for (int i = 0; i < pClient->Messages().Count(); ++i)
-                        DoSend(pClient->Messages()[i]);
+                        DoSend(session, pClient->Messages()[i]);
                 }
                 Log()->Message(_T("[%s:%d] SMTP client connected."), pConnection->Socket()->Binding()->PeerIP(),
                                pConnection->Socket()->Binding()->PeerPort());
@@ -984,13 +1015,6 @@ namespace Apostol {
         void CMessageServer::DoAPIConnected(CObject *Sender) {
             auto pConnection = dynamic_cast<CHTTPClientConnection *>(Sender);
             if (Assigned(pConnection)) {
-//                auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
-//                if (Assigned(pClient)) {
-//                    auto pMessage = dynamic_cast<CMessage *> (pClient->Data().Objects("message"));
-//                    if (Assigned(pMessage)) {
-//                        DoSend(*pMessage);
-//                    }
-//                }
                 Log()->Message(_T("[%s:%d] API client connected."), pConnection->Socket()->Binding()->PeerIP(),
                                pConnection->Socket()->Binding()->PeerPort());
             }
@@ -1021,7 +1045,9 @@ namespace Apostol {
 
             CStringList SQL;
 
-            api::authorize(SQL, m_MailBot);
+            const auto &session = pClient->Data()["session"];
+
+            api::authorize(SQL, session);
             for (int i = 0; i < pClient->Messages().Count(); ++i) {
                 const auto& Message = pClient->Messages()[i];
                 api::set_object_label(SQL, Message.MessageId(), E.what());
@@ -1046,11 +1072,13 @@ namespace Apostol {
                          ANotify->be_pid, ANotify->relname, ANotify->extra);
 #endif
             if (m_Status == psRunning) {
+                for (int i = 0; i < m_Sessions.Count(); ++i) {
 #if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
-                new CMessageHandler(this, ANotify->extra, [this](auto &&Id) { DoMessage(Id); });
+                    new CMessageHandler(this, m_Sessions[i], ANotify->extra, [this](auto &&Id) { DoMessage(Id); });
 #else
-                new CMessageHandler(this, ANotify->extra, std::bind(&CMessageServer::DoMessage, this, _1));
+                    new CMessageHandler(this, m_Sessions[i], ANotify->extra, std::bind(&CMessageServer::DoMessage, this, _1));
 #endif
+                }
                 UnloadMessageQueue();
             }
         }

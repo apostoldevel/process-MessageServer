@@ -272,11 +272,11 @@ namespace Apostol {
                 DebugRequest(ARequest);
             };
 
-            const auto &id = Data.Values("id");
-            const auto &profile = Data.Values("profile");
-            const auto &address = Data.Values("address");
-            const auto &subject = Data.Values("subject");
-            const auto &content = Data.Values("content");
+            const auto &id = Data["id"];
+            const auto &profile = Data["profile"];
+            const auto &address = Data["address"];
+            const auto &subject = Data["subject"];
+            const auto &content = Data["content"];
 
             const auto &provider = Config[profile]["provider"].Lower();
             const auto &token = Tokens[provider.empty() ? GOOGLE_PROVIDER_NAME : provider]["access_token"];
@@ -341,15 +341,15 @@ namespace Apostol {
                 DebugRequest(ARequest);
             };
 
-            const auto &id = Data.Values("id");
+            const auto &id = Data["id"];
 
-            const auto &agent = Data.Values("agent");
-            const auto &area = Data.Values("area");
+            const auto &agent = Data["agent"];
+            const auto &area = Data["area"];
 
-            const auto &profile = Data.Values("profile");
-            const auto &address = Data.Values("address");
-            const auto &subject = Data.Values("subject");
-            const auto &content = Data.Values("content");
+            const auto &profile = Data["profile"];
+            const auto &address = Data["address"];
+            const auto &subject = Data["subject"];
+            const auto &content = Data["content"];
 
             auto pMessage = new CMessage();
 
@@ -429,15 +429,15 @@ namespace Apostol {
                 DebugRequest(ARequest);
             };
 
-            const auto &id = Data.Values("id");
+            const auto &id = Data["id"];
 
-            const auto &agent = Data.Values("agent");
-            const auto &area = Data.Values("area");
+            const auto &agent = Data["agent"];
+            const auto &area = Data["area"];
 
-            const auto &profile = Data.Values("profile");
-            const auto &address = Data.Values("address");
-            const auto &subject = Data.Values("subject");
-            const auto &content = Data.Values("content");
+            const auto &profile = Data["profile"];
+            const auto &address = Data["address"];
+            const auto &subject = Data["subject"];
+            const auto &content = Data["content"];
 
             auto pMessage = new CMessage();
 

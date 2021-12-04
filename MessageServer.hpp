@@ -49,6 +49,7 @@ namespace Apostol {
 
             CMessageServer *m_pServer;
 
+            CString m_Session {};
             CString m_MessageId {};
 
             bool m_Allow;
@@ -64,10 +65,11 @@ namespace Apostol {
 
         public:
 
-            CMessageHandler(CMessageServer *AServer, const CString &MessageId, COnMessageHandlerEvent && Handler);
+            CMessageHandler(CMessageServer *AServer, const CString &Session, const CString &MessageId, COnMessageHandlerEvent && Handler);
 
             ~CMessageHandler();
 
+            const CString &Session() const { return m_Session; }
             const CString &MessageId() const { return m_MessageId; }
 
             bool Allow() const { return m_Allow; };
@@ -101,8 +103,7 @@ namespace Apostol {
             CString m_Session;
             CString m_Secret;
 
-            CString m_ApiBot;
-            CString m_MailBot;
+            CStringList m_Sessions;
 
             CString m_Agent;
             CString m_Host;
@@ -131,6 +132,8 @@ namespace Apostol {
             void AfterRun() override;
 
             void Authentication();
+            void SignOut(const CString &Session);
+
             void CheckListen();
             void InitListen();
 
@@ -147,8 +150,8 @@ namespace Apostol {
             void CheckOutbox();
             void UnloadMessageQueue();
 
-            void SendMessage(const TPairs<CString>& Message);
-            void SendMessages(const CPQueryResult& Messages);
+            void SendMessage(const CString &Session, const TPairs<CString>& Message);
+            void SendMessages(const CString &Session, const CPQueryResult& Messages);
 
             void CreateAccessToken(const CProvider &Provider, const CString &Application, CStringList &Tokens);
 
@@ -163,13 +166,13 @@ namespace Apostol {
             void DoHeartbeat();
             void DoError(const Delphi::Exception::Exception &E);
 
-            void DoSend(const CMessage &Message);
-            void DoDone(const CMessage &Message);
+            void DoSend(const CString &Session, const CMessage &Message);
+            void DoDone(const CString &Session, const CMessage &Message);
 
             void DoMessage(CMessageHandler *AHandler);
 
-            void DoCancel(const CMessage &Message, const CString &Error);
-            void DoFail(const CMessage &Message, const CString &Error);
+            void DoCancel(const CString &Session, const CMessage &Message, const CString &Error);
+            void DoFail(const CString &Session, const CMessage &Message, const CString &Error);
 
             void DoSMTPRequest(CObject *Sender);
             void DoSMTPReply(CObject *Sender);
