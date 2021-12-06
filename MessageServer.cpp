@@ -1104,6 +1104,21 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
+        void CMessageServer::DoPQServerException(CPQServer *AServer, const Delphi::Exception::Exception &E) {
+            CServerProcess::DoPQServerException(AServer, E);
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CMessageServer::DoPQConnectException(CPQConnection *AConnection, const Delphi::Exception::Exception &E) {
+            CServerProcess::DoPQConnectException(AConnection, E);
+            if (m_Status == psRunning) {
+                DoError(E);
+                m_Queue.Clear();
+                m_FixedDate = Now() + (CDateTime) 3 / SecsPerDay;
+            }
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
         void CMessageServer::DoSMTPRequest(CObject *Sender) {
             auto pConnection = dynamic_cast<CSMTPConnection *>(Sender);
             const auto& command = pConnection->Command();
