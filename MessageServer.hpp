@@ -166,13 +166,13 @@ namespace Apostol {
             void DoHeartbeat();
             void DoError(const Delphi::Exception::Exception &E);
 
-            void DoSend(const CString &Session, const CMessage &Message);
-            void DoDone(const CString &Session, const CMessage &Message);
+            void DoSend(const CMessage &Message);
+            void DoDone(const CMessage &Message);
 
             void DoMessage(CMessageHandler *AHandler);
 
-            void DoCancel(const CString &Session, const CMessage &Message, const CString &Error);
-            void DoFail(const CString &Session, const CMessage &Message, const CString &Error);
+            void DoCancel(const CMessage &Message, const CString &Error);
+            void DoFail(const CMessage &Message, const CString &Error);
 
             void DoSMTPRequest(CObject *Sender);
             void DoSMTPReply(CObject *Sender);

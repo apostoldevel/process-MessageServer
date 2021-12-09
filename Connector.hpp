@@ -87,7 +87,7 @@ namespace Apostol {
             static void Init(const CIniFile &IniFile, const CString &Section, CSMTPConfig &Config);
             static void Load(const CString &FileName, CSMTPConfigs &Configs);
 
-            static void Send(const CStringPairs &Data, const CSMTPConfigs &Configs,
+            static void Send(const CString &Session, const CStringPairs &Data, const CSMTPConfigs &Configs,
                 COnGetSMTPClientEvent &&OnClient, COnMessageEvent &&OnDone, COnMessageErrorEvent &&OnFail);
 
         };
@@ -115,8 +115,8 @@ namespace Apostol {
         class CAPIConnector: public CCommonConnector {
         public:
 
-            static void Send(const CStringPairs &Data, const CStringListPairs &Config, const CStringListPairs &Tokens,
-                COnGetHTTPClientEvent &&OnClient,
+            static void Send(const CString &Session, const CStringPairs &Data, const CStringListPairs &Config,
+                const CStringListPairs &Tokens, COnGetHTTPClientEvent &&OnClient,
                 COnSocketExecuteEvent &&OnExecute, COnSocketExceptionEvent &&OnException,
                 COnMessageEvent &&OnDone, COnMessageErrorEvent &&OnFail);
 
@@ -131,8 +131,8 @@ namespace Apostol {
         class CFCMConnector: public CCommonConnector {
         public:
 
-            static void Send(const CStringPairs &Data, const CStringListPairs &Config, const CStringListPairs &Tokens,
-                COnGetHTTPClientEvent &&OnClient,
+            static void Send(const CString &Session, const CStringPairs &Data, const CStringListPairs &Config,
+                const CStringListPairs &Tokens, COnGetHTTPClientEvent &&OnClient,
                 COnSocketExecuteEvent &&OnExecute, COnSocketExceptionEvent &&OnException,
                 COnMessageEvent &&OnDone, COnMessageErrorEvent &&OnFail);
 
@@ -147,8 +147,8 @@ namespace Apostol {
         class CM2MConnector: public CCommonConnector {
         public:
 
-            static void Send(const CStringPairs &Data, const CStringListPairs &Config, const CStringListPairs &Tokens,
-                COnGetHTTPClientEvent &&OnClient,
+            static void Send(const CString &Session, const CStringPairs &Data, const CStringListPairs &Config,
+                const CStringListPairs &Tokens, COnGetHTTPClientEvent &&OnClient,
                 COnSocketExecuteEvent &&OnExecute, COnSocketExceptionEvent &&OnException,
                 COnMessageEvent &&OnDone, COnMessageErrorEvent &&OnFail);
 
@@ -163,8 +163,8 @@ namespace Apostol {
         class CSBAConnector: public CCommonConnector {
         public:
 
-            static void Send(const CStringPairs &Data, const CStringListPairs &Config, const CStringListPairs &Tokens,
-                COnGetHTTPClientEvent &&OnClient,
+            static void Send(const CString &Session, const CStringPairs &Data, const CStringListPairs &Config,
+                const CStringListPairs &Tokens, COnGetHTTPClientEvent &&OnClient,
                 COnSocketExecuteEvent &&OnExecute, COnSocketExceptionEvent &&OnException,
                 COnMessageEvent &&OnDone, COnMessageErrorEvent &&OnFail);
 

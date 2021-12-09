@@ -113,23 +113,24 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CSMTPConnector::Send(const CStringPairs &Data, const CSMTPConfigs &Configs,
+        void CSMTPConnector::Send(const CString &Session, const CStringPairs &Data, const CSMTPConfigs &Configs,
                 COnGetSMTPClientEvent &&OnClient, COnMessageEvent &&OnDone, COnMessageErrorEvent &&OnFail) {
 
-            const auto &id = Data.Values("id");
-            const auto &profile = Data.Values("profile");
+            const auto &id = Data["id"];
+            const auto &profile = Data["profile"];
 
             const auto pos = profile.Find('@');
             const auto &config = pos == CString::npos ? profile : profile.SubString(0, pos);
 
             const auto &from = Configs[config].UserName();
-            const auto &address = Data.Values("address");
-            const auto &subject = Data.Values("subject");
-            const auto &content = Data.Values("content");
+            const auto &address = Data["address"];
+            const auto &subject = Data["subject"];
+            const auto &content = Data["content"];
 
             auto pClient = OnClient(Configs[config]);
             auto &Message = pClient->NewMessage();
 
+            Message.Session() = Session;
             Message.MessageId() = id;
             Message.From() = from;
             Message.To() = address;
@@ -163,8 +164,8 @@ namespace Apostol {
 
         //--------------------------------------------------------------------------------------------------------------
 
-        void CAPIConnector::Send(const CStringPairs &Data, const CStringListPairs &Config, const CStringListPairs &Tokens,
-                COnGetHTTPClientEvent &&OnClient,
+        void CAPIConnector::Send(const CString &Session, const CStringPairs &Data, const CStringListPairs &Config,
+                const CStringListPairs &Tokens, COnGetHTTPClientEvent &&OnClient,
                 COnSocketExecuteEvent &&OnExecute, COnSocketExceptionEvent &&OnException,
                 COnMessageEvent &&OnDone, COnMessageErrorEvent &&OnFail) {
 
@@ -201,6 +202,7 @@ namespace Apostol {
 
             auto pMessage = new CMessage();
 
+            pMessage->Session() = Session;
             pMessage->MessageId() = id;
             pMessage->From() = profile;
             pMessage->To() = address;
@@ -250,8 +252,8 @@ namespace Apostol {
 
         //--------------------------------------------------------------------------------------------------------------
 
-        void CFCMConnector::Send(const CStringPairs &Data, const CStringListPairs &Config, const CStringListPairs &Tokens,
-                COnGetHTTPClientEvent &&OnClient,
+        void CFCMConnector::Send(const CString &Session, const CStringPairs &Data, const CStringListPairs &Config,
+                const CStringListPairs &Tokens, COnGetHTTPClientEvent &&OnClient,
                 COnSocketExecuteEvent &&OnExecute, COnSocketExceptionEvent &&OnException,
                 COnMessageEvent &&OnDone, COnMessageErrorEvent &&OnFail) {
 
@@ -286,6 +288,7 @@ namespace Apostol {
 
             auto pMessage = new CMessage();
 
+            pMessage->Session() = Session;
             pMessage->MessageId() = id;
             pMessage->From() = profile;
             pMessage->To() = address;
@@ -319,8 +322,8 @@ namespace Apostol {
 
         //--------------------------------------------------------------------------------------------------------------
 
-        void CM2MConnector::Send(const CStringPairs &Data, const CStringListPairs &Config, const CStringListPairs &Tokens,
-                COnGetHTTPClientEvent &&OnClient,
+        void CM2MConnector::Send(const CString &Session, const CStringPairs &Data, const CStringListPairs &Config,
+                const CStringListPairs &Tokens, COnGetHTTPClientEvent &&OnClient,
                 COnSocketExecuteEvent &&OnExecute, COnSocketExceptionEvent &&OnException,
                 COnMessageEvent &&OnDone, COnMessageErrorEvent &&OnFail) {
 
@@ -353,6 +356,7 @@ namespace Apostol {
 
             auto pMessage = new CMessage();
 
+            pMessage->Session() = Session;
             pMessage->MessageId() = id;
             pMessage->From() = profile;
             pMessage->To() = address;
@@ -392,8 +396,8 @@ namespace Apostol {
 
         //--------------------------------------------------------------------------------------------------------------
 
-        void CSBAConnector::Send(const CStringPairs &Data, const CStringListPairs &Config, const CStringListPairs &Tokens,
-                COnGetHTTPClientEvent &&OnClient,
+        void CSBAConnector::Send(const CString &Session, const CStringPairs &Data, const CStringListPairs &Config,
+                const CStringListPairs &Tokens, COnGetHTTPClientEvent &&OnClient,
                 COnSocketExecuteEvent &&OnExecute, COnSocketExceptionEvent &&OnException,
                 COnMessageEvent &&OnDone, COnMessageErrorEvent &&OnFail) {
 
@@ -405,23 +409,23 @@ namespace Apostol {
 
                 auto pMessage = dynamic_cast<CMessage *> (Sender->Data().Objects("message"));
                 if (pMessage != nullptr) {
-                    CStringList DataForm;
+                    CStringList dataForm;
 
-                    DataForm.LineBreak("&");
-                    DataForm.Delimiter('&');
+                    dataForm.LineBreak("&");
+                    dataForm.Delimiter('&');
 
-                    DataForm = pMessage->Content();
+                    dataForm = pMessage->Content();
 
-                    DataForm.AddPair("userName", username);
-                    DataForm.AddPair("password", password);
+                    dataForm.AddPair("userName", username);
+                    dataForm.AddPair("password", password);
 
-                    for (int i = 0; i < DataForm.Count(); ++i) {
-                        const auto& name = DataForm.Names(i);
-                        const auto& value = DataForm.ValueFromIndex(i);
-                        DataForm.Values(name, CHTTPServer::URLEncode(value));
+                    for (int i = 0; i < dataForm.Count(); ++i) {
+                        const auto& name = dataForm.Names(i);
+                        const auto& value = dataForm.ValueFromIndex(i);
+                        dataForm.Values(name, CHTTPServer::URLEncode(value));
                     }
 
-                    ARequest->Content = DataForm.Text();
+                    ARequest->Content = dataForm.Text();
                 }
 
                 CHTTPRequest::Prepare(ARequest, _T("POST"), uri.c_str(), _T("application/x-www-form-urlencoded"));
@@ -441,6 +445,7 @@ namespace Apostol {
 
             auto pMessage = new CMessage();
 
+            pMessage->Session() = Session;
             pMessage->MessageId() = id;
             pMessage->From() = profile;
             pMessage->To() = address;

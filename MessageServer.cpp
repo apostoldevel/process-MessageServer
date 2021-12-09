@@ -572,10 +572,8 @@ namespace Apostol {
 
         void CMessageServer::SendMessage(const CString &Session, const TPairs<CString> &Message) {
 
-            auto OnSMTPClient = [this, &Session](const CSMTPConfig &Config) {
-                auto pClient = GetSMTPClient(Config);
-                pClient->Data().AddPair("session", Session);
-                return pClient;
+            auto OnSMTPClient = [this](const CSMTPConfig &Config) {
+                return GetSMTPClient(Config);
             };
             //----------------------------------------------------------------------------------------------------------
 
@@ -592,15 +590,15 @@ namespace Apostol {
             };
             //----------------------------------------------------------------------------------------------------------
 
-            auto OnDone = [this, &Session](const CMessage &Message) {
+            auto OnDone = [this](const CMessage &Message) {
                 DeleteProgress(Message.MessageId());
-                DoDone(Session, Message);
+                DoDone(Message);
             };
             //----------------------------------------------------------------------------------------------------------
 
-            auto OnFail = [this, &Session](const CMessage &Message, const CString &Error) {
+            auto OnFail = [this](const CMessage &Message, const CString &Error) {
                 DeleteProgress(Message.MessageId());
-                DoFail(Session, Message, Error);
+                DoFail(Message, Error);
             };
             //----------------------------------------------------------------------------------------------------------
 
@@ -634,7 +632,7 @@ namespace Apostol {
             };
             //----------------------------------------------------------------------------------------------------------
 
-            auto OnAPIExecute = [this, &Session](CTCPConnection *Sender) {
+            auto OnAPIExecute = [this](CTCPConnection *Sender) {
 
                 auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
                 auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
@@ -651,7 +649,7 @@ namespace Apostol {
 
                     CStringList SQL;
 
-                    api::authorize(SQL, Session);
+                    api::authorize(SQL, pMessage->Session());
                     api::set_session_area(SQL, area);
                     api::add_inbox(SQL, pMessage->MessageId(), agent, CString(), pMessage->From(), pMessage->To().First(), pMessage->Subject(), pReply->Content);
 
@@ -695,17 +693,17 @@ namespace Apostol {
 
             if (type == "email.agent") {
                 if (agent == "smtp.agent") {
-                    Connectors::CSMTPConnector::Send(Message, m_Configs, OnSMTPClient, OnDone, OnFail);
+                    Connectors::CSMTPConnector::Send(Session, Message, m_Configs, OnSMTPClient, OnDone, OnFail);
                 }
             } else if (type == "api.agent") {
                 if (agent == "fcm.agent") {
-                    Connectors::CFCMConnector::Send(Message, m_Profiles["fcm"], m_Tokens, OnHTTPClient, OnFCMExecute, OnException, OnDone, OnFail);
+                    Connectors::CFCMConnector::Send(Session, Message, m_Profiles["fcm"], m_Tokens, OnHTTPClient, OnFCMExecute, OnException, OnDone, OnFail);
                 } else if (agent == "m2m.agent") {
-                    Connectors::CM2MConnector::Send(Message, m_Profiles["m2m"], m_Tokens, OnHTTPClient, OnAPIExecute, OnException, OnDone, OnFail);
+                    Connectors::CM2MConnector::Send(Session, Message, m_Profiles["m2m"], m_Tokens, OnHTTPClient, OnAPIExecute, OnException, OnDone, OnFail);
                 } else if (agent == "sba.agent") {
-                    Connectors::CSBAConnector::Send(Message, m_Profiles["sba"], m_Tokens, OnHTTPClient, OnAPIExecute, OnException, OnDone, OnFail);
+                    Connectors::CSBAConnector::Send(Session, Message, m_Profiles["sba"], m_Tokens, OnHTTPClient, OnAPIExecute, OnException, OnDone, OnFail);
                 } else if (agent != "bm.agent") {
-                    Connectors::CAPIConnector::Send(Message, m_Profiles["api"], m_Tokens, OnHTTPClient, OnAPIExecute, OnException, OnDone, OnFail);
+                    Connectors::CAPIConnector::Send(Session, Message, m_Profiles["api"], m_Tokens, OnHTTPClient, OnAPIExecute, OnException, OnDone, OnFail);
                 }
             }
         }
@@ -893,10 +891,10 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::DoSend(const CString &Session, const CMessage &Message) {
+        void CMessageServer::DoSend(const CMessage &Message) {
             CStringList SQL;
 
-            api::authorize(SQL, Session);
+            api::authorize(SQL, Message.Session());
             api::execute_object_action(SQL, Message.MessageId(), "send");
 
             Log()->Message("[%s] Message sending...", Message.MessageId().c_str());
@@ -909,10 +907,10 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::DoCancel(const CString &Session, const CMessage &Message, const CString &Error) {
+        void CMessageServer::DoCancel(const CMessage &Message, const CString &Error) {
             CStringList SQL;
 
-            api::authorize(SQL, Session);
+            api::authorize(SQL, Message.Session());
             api::execute_object_action(SQL, Message.MessageId(), "cancel");
             api::set_object_label(SQL, Message.MessageId(), Error);
 
@@ -926,7 +924,7 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::DoDone(const CString &Session, const CMessage &Message) {
+        void CMessageServer::DoDone(const CMessage &Message) {
 
             auto OnExecuted = [this](CPQPollQuery *APollQuery) {
                 delete APollQuery->Binding();
@@ -940,7 +938,7 @@ namespace Apostol {
 
             CStringList SQL;
 
-            api::authorize(SQL, Session);
+            api::authorize(SQL, Message.Session());
             api::execute_object_action(SQL, Message.MessageId(), "done");
 
             if (!Message.MsgId().IsEmpty())
@@ -956,7 +954,7 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::DoFail(const CString &Session, const CMessage &Message, const CString &Error) {
+        void CMessageServer::DoFail(const CMessage &Message, const CString &Error) {
 
             auto OnExecuted = [this](CPQPollQuery *APollQuery) {
                 delete APollQuery->Binding();
@@ -970,7 +968,7 @@ namespace Apostol {
 
             CStringList SQL;
 
-            api::authorize(SQL, Session);
+            api::authorize(SQL, Message.Session());
             api::execute_object_action(SQL, Message.MessageId(), "fail");
             api::set_object_label(SQL, Message.MessageId(), Error);
 
@@ -989,11 +987,10 @@ namespace Apostol {
             if (Assigned(pConnection)) {
                 auto pClient = dynamic_cast<CSMTPClient *> (pConnection->Client());
                 if (Assigned(pClient)) {
-                    const auto &session = pClient->Data()["session"];
                     for (int i = 0; i < pClient->Messages().Count(); ++i)
-                        DoSend(session, pClient->Messages()[i]);
+                        DoSend(pClient->Messages()[i]);
                 }
-                Log()->Message(_T("[%s:%d] SMTP client connected."), pConnection->Socket()->Binding()->PeerIP(),
+                Log()->Notice(_T("[%s:%d] SMTP client connected."), pConnection->Socket()->Binding()->PeerIP(),
                                pConnection->Socket()->Binding()->PeerPort());
             }
         }
@@ -1003,10 +1000,10 @@ namespace Apostol {
             auto pConnection = dynamic_cast<CSMTPConnection *>(Sender);
             if (Assigned(pConnection)) {
                 if (!pConnection->ClosedGracefully()) {
-                    Log()->Message(_T("[%s:%d] SMTP client disconnected."), pConnection->Socket()->Binding()->PeerIP(),
+                    Log()->Notice(_T("[%s:%d] SMTP client disconnected."), pConnection->Socket()->Binding()->PeerIP(),
                                    pConnection->Socket()->Binding()->PeerPort());
                 } else {
-                    Log()->Message(_T("SMTP client disconnected."));
+                    Log()->Notice(_T("SMTP client disconnected."));
                 }
             }
         }
@@ -1015,7 +1012,7 @@ namespace Apostol {
         void CMessageServer::DoAPIConnected(CObject *Sender) {
             auto pConnection = dynamic_cast<CHTTPClientConnection *>(Sender);
             if (Assigned(pConnection)) {
-                Log()->Message(_T("[%s:%d] API client connected."), pConnection->Socket()->Binding()->PeerIP(),
+                Log()->Notice(_T("[%s:%d] API client connected."), pConnection->Socket()->Binding()->PeerIP(),
                                pConnection->Socket()->Binding()->PeerPort());
             }
         }
@@ -1030,10 +1027,10 @@ namespace Apostol {
                     delete pMessage;
                 }
                 if (!pConnection->ClosedGracefully()) {
-                    Log()->Message(_T("[%s:%d] API client disconnected."), pConnection->Socket()->Binding()->PeerIP(),
+                    Log()->Notice(_T("[%s:%d] API client disconnected."), pConnection->Socket()->Binding()->PeerIP(),
                                    pConnection->Socket()->Binding()->PeerPort());
                 } else {
-                    Log()->Message(_T("API client disconnected."));
+                    Log()->Notice(_T("API client disconnected."));
                 }
             }
         }
