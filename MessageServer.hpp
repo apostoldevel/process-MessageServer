@@ -128,6 +128,8 @@ namespace Apostol {
 
             TPairs<CStringListPairs> m_Profiles;
 
+            size_t m_MaxMessagesQueue;
+
             void BeforeRun() override;
             void AfterRun() override;
 
@@ -204,6 +206,7 @@ namespace Apostol {
                 return new CMessageServer(AParent, AApplication);
             }
 
+            int IndexOfProgress(const CString &MessageId);
             int AddProgress(const CString &MessageId);
             void DeleteProgress(const CString &MessageId);
 

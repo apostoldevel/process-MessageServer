@@ -33,8 +33,6 @@ Author:
 #define QUERY_INDEX_AUTH     0
 #define QUERY_INDEX_DATA     1
 
-#define MAX_MESSAGES_WITHOUT_QUEUE 5
-
 #define SLEEP_SECOND_AFTER_ERROR 10
 
 extern "C++" {
@@ -96,12 +94,13 @@ namespace Apostol {
         CMessageServer::CMessageServer(CCustomProcess *AParent, CApplication *AApplication):
                 inherited(AParent, AApplication, "message server") {
 
-            m_Agent = CString().Format("Message Server (%s)", Application()->Title().c_str());
+            m_Agent = CString().Format("%s (Message Server)", Application()->Title().c_str());
             m_Host = CApostolModule::GetIPByHostName(CApostolModule::GetHostName());
 
             m_AuthDate = 0;
             m_FixedDate = 0;
             m_CheckDate = 0;
+            m_MaxMessagesQueue = 0;
 
             m_Status = psStopped;
         }
@@ -338,16 +337,21 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
+        int CMessageServer::IndexOfProgress(const CString &MessageId) {
+            return m_Progress.IndexOf(MessageId);
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
         int CMessageServer::AddProgress(const CString &MessageId) {
-            int index = m_Progress.IndexOf(MessageId);
+            const auto index = IndexOfProgress(MessageId);
             if (index == -1)
-                index = m_Progress.Add(MessageId);
+                return m_Progress.Add(MessageId);
             return index;
         }
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::DeleteProgress(const CString &MessageId) {
-            const auto index = m_Progress.IndexOf(MessageId);
+            const auto index = IndexOfProgress(MessageId);
             if (index != -1)
                 m_Progress.Delete(index);
         }
@@ -399,11 +403,14 @@ namespace Apostol {
         void CMessageServer::Reload() {
             CServerProcess::Reload();
 
+            m_Sessions.Clear();
             m_Queue.Clear();
             m_Progress.Clear();
             m_Configs.Clear();
             m_Providers.Clear();
             m_Profiles.Clear();
+
+            m_MaxMessagesQueue = Config()->PostgresPollMax();
 
             m_AuthDate = 0;
             m_FixedDate = 0;
@@ -516,6 +523,7 @@ namespace Apostol {
                     m_Session = login.First()["session"];
                     m_Secret = login.First()["secret"];
 
+                    m_Sessions.Clear();
                     for (int i = 0; i < sessions.Count(); ++i) {
                         m_Sessions.Add(sessions[i]["get_sessions"]);
                     }
@@ -536,13 +544,11 @@ namespace Apostol {
                 DoError(E);
             };
 
-            CString Application(SERVICE_APPLICATION_NAME);
+            const auto &caProviders = Server().Providers();
+            const auto &caProvider = caProviders.DefaultValue();
 
-            const auto &Providers = Server().Providers();
-            const auto &Provider = Providers.DefaultValue();
-
-            m_ClientId = Provider.ClientId(Application);
-            m_ClientSecret = Provider.Secret(Application);
+            m_ClientId = caProvider.ClientId(SERVICE_APPLICATION_NAME);
+            m_ClientSecret = caProvider.Secret(SERVICE_APPLICATION_NAME);
 
             CStringList SQL;
 
@@ -591,13 +597,11 @@ namespace Apostol {
             //----------------------------------------------------------------------------------------------------------
 
             auto OnDone = [this](const CMessage &Message) {
-                DeleteProgress(Message.MessageId());
                 DoDone(Message);
             };
             //----------------------------------------------------------------------------------------------------------
 
             auto OnFail = [this](const CMessage &Message, const CString &Error) {
-                DeleteProgress(Message.MessageId());
                 DoFail(Message, Error);
             };
             //----------------------------------------------------------------------------------------------------------
@@ -787,7 +791,6 @@ namespace Apostol {
         void CMessageServer::DoError(const Delphi::Exception::Exception &E) {
             m_Session.Clear();
             m_Secret.Clear();
-            m_Sessions.Clear();
 
             m_AuthDate = Now() + (CDateTime) SLEEP_SECOND_AFTER_ERROR / SecsPerDay; // 10 sec;
             m_CheckDate = m_AuthDate;
@@ -857,7 +860,10 @@ namespace Apostol {
                 DoError(E);
             };
 
-            if (m_Progress.Count() > MAX_MESSAGES_WITHOUT_QUEUE)
+            if (m_Progress.Count() > m_MaxMessagesQueue)
+                return;
+
+            if (IndexOfProgress(AHandler->MessageId()) >= 0)
                 return;
 
             CStringList SQL;
@@ -927,12 +933,20 @@ namespace Apostol {
         void CMessageServer::DoDone(const CMessage &Message) {
 
             auto OnExecuted = [this](CPQPollQuery *APollQuery) {
-                delete APollQuery->Binding();
+                auto pHandler = dynamic_cast<CMessageHandler *> (APollQuery->Binding());
+                if (Assigned(pHandler)) {
+                    DeleteProgress(pHandler->MessageId());
+                    delete pHandler;
+                }
                 UnloadMessageQueue();
             };
 
             auto OnException = [this](CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
-                delete APollQuery->Binding();
+                auto pHandler = dynamic_cast<CMessageHandler *> (APollQuery->Binding());
+                if (Assigned(pHandler)) {
+                    DeleteProgress(pHandler->MessageId());
+                    delete pHandler;
+                }
                 DoError(E);
             };
 
@@ -957,12 +971,20 @@ namespace Apostol {
         void CMessageServer::DoFail(const CMessage &Message, const CString &Error) {
 
             auto OnExecuted = [this](CPQPollQuery *APollQuery) {
-                delete APollQuery->Binding();
+                auto pHandler = dynamic_cast<CMessageHandler *> (APollQuery->Binding());
+                if (Assigned(pHandler)) {
+                    DeleteProgress(pHandler->MessageId());
+                    delete pHandler;
+                }
                 UnloadMessageQueue();
             };
 
             auto OnException = [this](CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
-                delete APollQuery->Binding();
+                auto pHandler = dynamic_cast<CMessageHandler *> (APollQuery->Binding());
+                if (Assigned(pHandler)) {
+                    DeleteProgress(pHandler->MessageId());
+                    delete pHandler;
+                }
                 DoError(E);
             };
 
@@ -1012,8 +1034,13 @@ namespace Apostol {
         void CMessageServer::DoAPIConnected(CObject *Sender) {
             auto pConnection = dynamic_cast<CHTTPClientConnection *>(Sender);
             if (Assigned(pConnection)) {
-                Log()->Notice(_T("[%s:%d] API client connected."), pConnection->Socket()->Binding()->PeerIP(),
-                               pConnection->Socket()->Binding()->PeerPort());
+                auto pSocket = pConnection->Socket();
+                if (pSocket != nullptr) {
+                    auto pHandle = pSocket->Binding();
+                    if (pHandle != nullptr) {
+                        Log()->Notice(_T("[%s:%d] API client connected."), pHandle->PeerIP(), pHandle->PeerPort());
+                    }
+                }
             }
         }
         //--------------------------------------------------------------------------------------------------------------
@@ -1024,11 +1051,15 @@ namespace Apostol {
                 auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
                 if (Assigned(pClient)) {
                     auto pMessage = dynamic_cast<CMessage *> (pClient->Data().Objects("message"));
+                    chASSERT(pMessage);
                     delete pMessage;
                 }
-                if (!pConnection->ClosedGracefully()) {
-                    Log()->Notice(_T("[%s:%d] API client disconnected."), pConnection->Socket()->Binding()->PeerIP(),
-                                   pConnection->Socket()->Binding()->PeerPort());
+                auto pSocket = pConnection->Socket();
+                if (pSocket != nullptr) {
+                    auto pHandle = pSocket->Binding();
+                    if (pHandle != nullptr) {
+                        Log()->Notice(_T("[%s:%d] API client disconnected."), pHandle->PeerIP(), pHandle->PeerPort());
+                    }
                 } else {
                     Log()->Notice(_T("API client disconnected."));
                 }
