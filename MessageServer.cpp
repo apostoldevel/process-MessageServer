@@ -119,9 +119,9 @@ namespace Apostol {
 
             SetUser(Config()->User(), Config()->Group());
 
-            InitializePQServer(Application()->Title());
+            InitializePQClient(Application()->Title());
 
-            PQServerStart(_T("helper"));
+            PQClientStart(_T("helper"));
 
             SigProcMask(SIG_UNBLOCK, SigAddSet(&set));
 
@@ -131,7 +131,7 @@ namespace Apostol {
 
         void CMessageServer::AfterRun() {
             CApplicationProcess::AfterRun();
-            PQServerStop();
+            PQClientStop();
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -141,7 +141,7 @@ namespace Apostol {
                 Log()->Debug(APP_LOG_DEBUG_EVENT, _T("message server cycle"));
 
                 try {
-                    PQServer().Wait();
+                    PQClient().Wait();
                 } catch (Delphi::Exception::Exception &E) {
                     Log()->Error(APP_LOG_ERR, 0, "%s", E.what());
                 }
@@ -366,7 +366,7 @@ namespace Apostol {
 
             auto pClient = m_MailManager.Add(Config);
 
-            pClient->PollStack(PQServer().PollStack());
+            pClient->PollStack(PQClient().PollStack());
 
             pClient->ClientName() = Application()->Title();
 
@@ -497,10 +497,10 @@ namespace Apostol {
 
         void CMessageServer::CheckListen() {
             int index = 0;
-            while (index < PQServer().PollManager()->Count() && !PQServer().Connections(index)->Listener())
+            while (index < PQClient().PollManager()->Count() && !PQClient().Connections(index)->Listener())
                 index++;
 
-            if (index == PQServer().PollManager()->Count())
+            if (index == PQClient().PollManager()->Count())
                 InitListen();
         }
         //--------------------------------------------------------------------------------------------------------------
@@ -1132,8 +1132,8 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::DoPQServerException(CPQServer *AServer, const Delphi::Exception::Exception &E) {
-            CServerProcess::DoPQServerException(AServer, E);
+        void CMessageServer::DoPQClientException(CPQClient *AClient, const Delphi::Exception::Exception &E) {
+            CServerProcess::DoPQClientException(AClient, E);
         }
         //--------------------------------------------------------------------------------------------------------------
 
