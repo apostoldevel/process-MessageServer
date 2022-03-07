@@ -337,6 +337,14 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
+        void CMessageServer::DeleteHandler(CMessageHandler *AHandler) {
+            if (AHandler != nullptr) {
+                DeleteProgress(AHandler->MessageId());
+            }
+            delete AHandler;
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
         int CMessageServer::IndexOfProgress(const CString &MessageId) {
             return m_Progress.IndexOf(MessageId);
         }
@@ -838,35 +846,38 @@ namespace Apostol {
 
                 auto pHandler = dynamic_cast<CMessageHandler *> (APollQuery->Binding());
 
+                if (pHandler == nullptr) {
+                    return;
+                }
+
                 try {
                     CApostolModule::QueryToResults(APollQuery, pqResults);
                     const auto &messages = pqResults[QUERY_INDEX_DATA];
-                    for (int i = 0; i < messages.Count(); ++i) {
-                        SendMessage(pHandler->Session(), messages[i]);
+                    if (messages.Count() > 0) {
+                        for (int i = 0; i < messages.Count(); ++i) {
+                            SendMessage(pHandler->Session(), messages[i]);
+                        }
+                    } else {
+                        DeleteHandler(pHandler);
                     }
                 } catch (Delphi::Exception::Exception &E) {
-                    DeleteProgress(pHandler->MessageId());
-                    delete pHandler;
+                    DeleteHandler(pHandler);
                     DoError(E);
                 }
             };
 
             auto OnException = [this](CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
                 auto pHandler = dynamic_cast<CMessageHandler *> (APollQuery->Binding());
-                if (pHandler != nullptr) {
-                    DeleteProgress(pHandler->MessageId());
-                    delete pHandler;
-                }
+                DeleteHandler(pHandler);
                 DoError(E);
             };
 
             if (m_Progress.Count() > m_MaxMessagesQueue) {
-                Log()->Error(APP_LOG_ALERT, 0, "Maximum message queue reached.");
                 return;
             }
 
             if (IndexOfProgress(AHandler->MessageId()) >= 0) {
-                Log()->Error(APP_LOG_ALERT, 0, "Message %s already in progress.", AHandler->MessageId().c_str());
+                Log()->Error(APP_LOG_WARN, 0, "Message %s already in progress.", AHandler->MessageId().c_str());
                 return;
             }
 
@@ -880,8 +891,7 @@ namespace Apostol {
                 AddProgress(AHandler->MessageId());
                 AHandler->Allow(false);
             } catch (Delphi::Exception::Exception &E) {
-                DeleteProgress(AHandler->MessageId());
-                delete AHandler;
+                DeleteHandler(AHandler);
                 DoError(E);
             }
         }
@@ -938,19 +948,13 @@ namespace Apostol {
 
             auto OnExecuted = [this](CPQPollQuery *APollQuery) {
                 auto pHandler = dynamic_cast<CMessageHandler *> (APollQuery->Binding());
-                if (Assigned(pHandler)) {
-                    DeleteProgress(pHandler->MessageId());
-                    delete pHandler;
-                }
+                DeleteHandler(pHandler);
                 UnloadMessageQueue();
             };
 
             auto OnException = [this](CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
                 auto pHandler = dynamic_cast<CMessageHandler *> (APollQuery->Binding());
-                if (Assigned(pHandler)) {
-                    DeleteProgress(pHandler->MessageId());
-                    delete pHandler;
-                }
+                DeleteHandler(pHandler);
                 DoError(E);
             };
 
@@ -976,19 +980,13 @@ namespace Apostol {
 
             auto OnExecuted = [this](CPQPollQuery *APollQuery) {
                 auto pHandler = dynamic_cast<CMessageHandler *> (APollQuery->Binding());
-                if (Assigned(pHandler)) {
-                    DeleteProgress(pHandler->MessageId());
-                    delete pHandler;
-                }
+                DeleteHandler(pHandler);
                 UnloadMessageQueue();
             };
 
             auto OnException = [this](CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
                 auto pHandler = dynamic_cast<CMessageHandler *> (APollQuery->Binding());
-                if (Assigned(pHandler)) {
-                    DeleteProgress(pHandler->MessageId());
-                    delete pHandler;
-                }
+                DeleteHandler(pHandler);
                 DoError(E);
             };
 

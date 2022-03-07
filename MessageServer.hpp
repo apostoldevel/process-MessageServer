@@ -152,6 +152,8 @@ namespace Apostol {
             void CheckOutbox();
             void UnloadMessageQueue();
 
+            void DeleteHandler(CMessageHandler *AHandler);
+
             void SendMessage(const CString &Session, const TPairs<CString>& Message);
             void SendMessages(const CString &Session, const CPQueryResult& Messages);
 
