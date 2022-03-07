@@ -63,7 +63,7 @@ namespace Apostol {
         //--------------------------------------------------------------------------------------------------------------
 
         CMessageHandler::~CMessageHandler() {
-            Close();
+            RemoveFromQueue();
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -863,8 +863,10 @@ namespace Apostol {
             if (m_Progress.Count() > m_MaxMessagesQueue)
                 return;
 
-            if (IndexOfProgress(AHandler->MessageId()) >= 0)
+            if (IndexOfProgress(AHandler->MessageId()) >= 0) {
+                Log()->Error(APP_LOG_ALERT, 0, "Message %s already in progress.", AHandler->MessageId().c_str());
                 return;
+            }
 
             CStringList SQL;
 
@@ -1108,6 +1110,8 @@ namespace Apostol {
 #endif
                 }
                 UnloadMessageQueue();
+            } else {
+                Log()->Error(APP_LOG_ALERT, 0, "Notify alert: Service not running.");
             }
         }
         //--------------------------------------------------------------------------------------------------------------

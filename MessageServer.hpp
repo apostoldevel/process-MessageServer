@@ -67,7 +67,7 @@ namespace Apostol {
 
             CMessageHandler(CMessageServer *AServer, const CString &Session, const CString &MessageId, COnMessageHandlerEvent && Handler);
 
-            ~CMessageHandler();
+            ~CMessageHandler() override;
 
             const CString &Session() const { return m_Session; }
             const CString &MessageId() const { return m_MessageId; }
