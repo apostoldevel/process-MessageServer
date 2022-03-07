@@ -860,8 +860,10 @@ namespace Apostol {
                 DoError(E);
             };
 
-            if (m_Progress.Count() > m_MaxMessagesQueue)
+            if (m_Progress.Count() > m_MaxMessagesQueue) {
+                Log()->Error(APP_LOG_ALERT, 0, "Maximum message queue reached.");
                 return;
+            }
 
             if (IndexOfProgress(AHandler->MessageId()) >= 0) {
                 Log()->Error(APP_LOG_ALERT, 0, "Message %s already in progress.", AHandler->MessageId().c_str());
