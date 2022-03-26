@@ -68,12 +68,12 @@ namespace Apostol {
         //--------------------------------------------------------------------------------------------------------------
 
         int CMessageHandler::AddToQueue() {
-            return m_pServer->Queue().AddToQueue(m_pServer, this);
+            return m_pServer->AddToQueue(this);
         }
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageHandler::RemoveFromQueue() {
-            m_pServer->Queue().RemoveFromQueue(m_pServer, this);
+            m_pServer->RemoveFromQueue(this);
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -94,13 +94,13 @@ namespace Apostol {
         CMessageServer::CMessageServer(CCustomProcess *AParent, CApplication *AApplication):
                 inherited(AParent, AApplication, "message server") {
 
-            m_Agent = CString().Format("%s (Message Server)", Application()->Title().c_str());
+            m_Agent = CString().Format("Message Server (%s)", Application()->Title().c_str());
             m_Host = CApostolModule::GetIPByHostName(CApostolModule::GetHostName());
 
             m_AuthDate = 0;
             m_FixedDate = 0;
             m_CheckDate = 0;
-            m_MaxMessagesQueue = 0;
+            m_MaxMessagesQueue = Config()->PostgresPollMin();
 
             m_Status = psStopped;
         }
@@ -119,7 +119,7 @@ namespace Apostol {
 
             SetUser(Config()->User(), Config()->Group());
 
-            InitializePQClient(Application()->Title());
+            InitializePQClient(Application()->Title(), 1, m_MaxMessagesQueue);
 
             PQClientStart(_T("helper"));
 
@@ -337,14 +337,6 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::DeleteHandler(CMessageHandler *AHandler) {
-            if (AHandler != nullptr) {
-                DeleteProgress(AHandler->MessageId());
-            }
-            delete AHandler;
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
         int CMessageServer::IndexOfProgress(const CString &MessageId) {
             return m_Progress.IndexOf(MessageId);
         }
@@ -362,6 +354,45 @@ namespace Apostol {
             const auto index = IndexOfProgress(MessageId);
             if (index != -1)
                 m_Progress.Delete(index);
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CMessageServer::DeleteHandler(CMessageHandler *AHandler) {
+            if (AHandler != nullptr) {
+                DeleteProgress(AHandler->MessageId());
+            }
+            delete AHandler;
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        int CMessageServer::AddToQueue(CMessageHandler *AHandler) {
+            return m_Queue.AddToQueue(this, AHandler);
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CMessageServer::InsertToQueue(int Index, CMessageHandler *AHandler) {
+            m_Queue.InsertToQueue(this, Index, AHandler);
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CMessageServer::RemoveFromQueue(CMessageHandler *AHandler) {
+            m_Queue.RemoveFromQueue(this, AHandler);
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CMessageServer::UnloadMessageQueue() {
+            const auto index = m_Queue.IndexOf(this);
+            if (index != -1) {
+                const auto queue = m_Queue[index];
+                for (int i = 0; i < queue->Count(); ++i) {
+                    auto pHandler = (CMessageHandler *) queue->Item(i);
+                    if (pHandler != nullptr) {
+                        pHandler->Handler();
+                    }
+                    if (m_Progress.Count() >= m_MaxMessagesQueue)
+                        break;
+                }
+            }
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -417,8 +448,7 @@ namespace Apostol {
             m_Configs.Clear();
             m_Providers.Clear();
             m_Profiles.Clear();
-
-            m_MaxMessagesQueue = Config()->PostgresPollMax();
+            m_Tokens.Clear();
 
             m_AuthDate = 0;
             m_FixedDate = 0;
@@ -449,6 +479,7 @@ namespace Apostol {
                     const auto &config = profile[j].Value();
                     const auto &oauth2 = config["oauth2"];
                     if (!oauth2.IsEmpty()) {
+                        const auto &server = config["server"];
                         const auto &provider = config["provider"];
                         const auto &application = config["application"];
                         m_Tokens.AddPair(provider, CStringList());
@@ -782,20 +813,6 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::UnloadMessageQueue() {
-            const auto index = m_Queue.IndexOf(this);
-            if (index != -1) {
-                const auto queue = m_Queue[index];
-                for (int i = 0; i < queue->Count(); ++i) {
-                    auto pHandler = (CMessageHandler *) queue->Item(i);
-                    if (pHandler != nullptr) {
-                        pHandler->Handler();
-                    }
-                }
-            }
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
         void CMessageServer::DoError(const Delphi::Exception::Exception &E) {
             m_Session.Clear();
             m_Secret.Clear();
@@ -861,8 +878,8 @@ namespace Apostol {
                         DeleteHandler(pHandler);
                     }
                 } catch (Delphi::Exception::Exception &E) {
+                    Log()->Error(APP_LOG_ERR, 0, "%s", E.what());
                     DeleteHandler(pHandler);
-                    DoError(E);
                 }
             };
 
@@ -871,10 +888,6 @@ namespace Apostol {
                 DeleteHandler(pHandler);
                 DoError(E);
             };
-
-            if (m_Progress.Count() > m_MaxMessagesQueue) {
-                return;
-            }
 
             if (IndexOfProgress(AHandler->MessageId()) >= 0) {
                 Log()->Error(APP_LOG_WARN, 0, "Message %s already in progress.", AHandler->MessageId().c_str());
@@ -1104,11 +1117,12 @@ namespace Apostol {
             if (m_Status == psRunning) {
                 for (int i = 0; i < m_Sessions.Count(); ++i) {
 #if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
-                    new CMessageHandler(this, m_Sessions[i], ANotify->extra, [this](auto &&Id) { DoMessage(Id); });
+                    new CMessageHandler(this, m_Sessions[i], ANotify->extra, [this](auto &&Handler) { DoMessage(Handler); });
 #else
                     new CMessageHandler(this, m_Sessions[i], ANotify->extra, std::bind(&CMessageServer::DoMessage, this, _1));
 #endif
                 }
+
                 UnloadMessageQueue();
             } else {
                 Log()->Error(APP_LOG_ALERT, 0, "Notify alert: Service not running.");
