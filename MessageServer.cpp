@@ -536,10 +536,10 @@ namespace Apostol {
 
         void CMessageServer::CheckListen() {
             int index = 0;
-            while (index < PQClient().PollManager()->Count() && !PQClient().Connections(index)->Listener())
+            while (index < PQClient().PollManager().Count() && !PQClient().Connections(index)->Listener())
                 index++;
 
-            if (index == PQClient().PollManager()->Count())
+            if (index == PQClient().PollManager().Count())
                 InitListen();
         }
         //--------------------------------------------------------------------------------------------------------------
