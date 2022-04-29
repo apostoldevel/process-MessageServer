@@ -163,11 +163,12 @@ namespace Apostol {
 
             static void InitConfig(const CIniFile &IniFile, const CString &Profile, CStringList &Config);
 
+            void Heartbeat(CDateTime Now);
+
         protected:
 
             void DoTimer(CPollEventHandler *AHandler) override;
 
-            void DoHeartbeat();
             void DoError(const Delphi::Exception::Exception &E);
 
             void DoSend(const CMessage &Message);
