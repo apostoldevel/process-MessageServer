@@ -941,8 +941,8 @@ namespace Apostol {
             CStringList SQL;
 
             api::authorize(SQL, Message.Session());
-            api::execute_object_action(SQL, Message.MessageId(), "cancel");
             api::set_object_label(SQL, Message.MessageId(), Error);
+            api::execute_object_action(SQL, Message.MessageId(), "cancel");
 
             Log()->Message("[%s] Sent message canceled.", Message.MessageId().c_str());
 
@@ -971,10 +971,12 @@ namespace Apostol {
             CStringList SQL;
 
             api::authorize(SQL, Message.Session());
-            api::execute_object_action(SQL, Message.MessageId(), "done");
 
-            if (!Message.MsgId().IsEmpty())
+            if (!Message.MsgId().IsEmpty()) {
                 api::set_object_label(SQL, Message.MessageId(), Message.MsgId());
+            }
+
+            api::execute_object_action(SQL, Message.MessageId(), "done");
 
             Log()->Message("[%s] Message sent successfully.", Message.MessageId().c_str());
 
@@ -1003,8 +1005,8 @@ namespace Apostol {
             CStringList SQL;
 
             api::authorize(SQL, Message.Session());
-            api::execute_object_action(SQL, Message.MessageId(), "fail");
             api::set_object_label(SQL, Message.MessageId(), Error);
+            api::execute_object_action(SQL, Message.MessageId(), "fail");
 
             Log()->Message("[%s] Message was not sent.", Message.MessageId().c_str());
 
