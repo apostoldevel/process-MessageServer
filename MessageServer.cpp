@@ -260,12 +260,14 @@ namespace Apostol {
                 return true;
             };
 
-            auto OnException = [&Provider](CTCPConnection *AConnection, const Delphi::Exception::Exception &E) {
+            auto OnException = [this, &Provider](CTCPConnection *AConnection, const Delphi::Exception::Exception &E) {
                 auto pConnection = dynamic_cast<CHTTPClientConnection *> (AConnection);
                 auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
 
                 Provider.KeyStatusTime(Now());
                 Provider.KeyStatus(ksFailed);
+
+                m_FixedDate = Now() + (CDateTime) 5 / SecsPerDay; // 5 sec
 
                 Log()->Error(APP_LOG_ERR, 0, "[%s:%d] %s", pClient->Host().c_str(), pClient->Port(), E.what());
             };
