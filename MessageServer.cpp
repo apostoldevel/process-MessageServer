@@ -616,7 +616,7 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::SendMessage(const CString &Session, const TPairs<CString> &Message) {
+        void CMessageServer::SendMessage(CMessageHandler *AHandler, const TPairs<CString> &Message) {
 
             auto OnSMTPClient = [this](const CSMTPConfig &Config) {
                 return GetSMTPClient(Config);
@@ -737,17 +737,21 @@ namespace Apostol {
 
             if (type == "email.agent") {
                 if (agent == "smtp.agent") {
-                    Connectors::CSMTPConnector::Send(Session, Message, m_Configs, OnSMTPClient, OnDone, OnFail);
+                    Connectors::CSMTPConnector::Send(AHandler->Session(), Message, m_Configs, OnSMTPClient, OnDone, OnFail);
+                } else {
+                    DeleteHandler(AHandler);
                 }
             } else if (type == "api.agent") {
                 if (agent == "fcm.agent") {
-                    Connectors::CFCMConnector::Send(Session, Message, m_Profiles["fcm"], m_Tokens, OnHTTPClient, OnFCMExecute, OnException, OnDone, OnFail);
+                    Connectors::CFCMConnector::Send(AHandler->Session(), Message, m_Profiles["fcm"], m_Tokens, OnHTTPClient, OnFCMExecute, OnException, OnDone, OnFail);
                 } else if (agent == "m2m.agent") {
-                    Connectors::CM2MConnector::Send(Session, Message, m_Profiles["m2m"], m_Tokens, OnHTTPClient, OnAPIExecute, OnException, OnDone, OnFail);
+                    Connectors::CM2MConnector::Send(AHandler->Session(), Message, m_Profiles["m2m"], m_Tokens, OnHTTPClient, OnAPIExecute, OnException, OnDone, OnFail);
                 } else if (agent == "sba.agent") {
-                    Connectors::CSBAConnector::Send(Session, Message, m_Profiles["sba"], m_Tokens, OnHTTPClient, OnAPIExecute, OnException, OnDone, OnFail);
+                    Connectors::CSBAConnector::Send(AHandler->Session(), Message, m_Profiles["sba"], m_Tokens, OnHTTPClient, OnAPIExecute, OnException, OnDone, OnFail);
                 } else if (agent != "bm.agent") {
-                    Connectors::CAPIConnector::Send(Session, Message, m_Profiles["api"], m_Tokens, OnHTTPClient, OnAPIExecute, OnException, OnDone, OnFail);
+                    Connectors::CAPIConnector::Send(AHandler->Session(), Message, m_Profiles["api"], m_Tokens, OnHTTPClient, OnAPIExecute, OnException, OnDone, OnFail);
+                } else {
+                    DeleteHandler(AHandler);
                 }
             }
         }
@@ -871,7 +875,7 @@ namespace Apostol {
                     const auto &messages = pqResults[QUERY_INDEX_DATA];
                     if (messages.Count() > 0) {
                         for (int i = 0; i < messages.Count(); ++i) {
-                            SendMessage(pHandler->Session(), messages[i]);
+                            SendMessage(pHandler, messages[i]);
                         }
                     } else {
                         DeleteHandler(pHandler);

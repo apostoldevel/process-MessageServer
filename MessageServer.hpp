@@ -154,7 +154,7 @@ namespace Apostol {
 
             void DeleteHandler(CMessageHandler *AHandler);
 
-            void SendMessage(const CString &Session, const TPairs<CString>& Message);
+            void SendMessage(CMessageHandler *AHandler, const TPairs<CString>& Message);
             void SendMessages(const CString &Session, const CPQueryResult& Messages);
 
             void CreateAccessToken(const CProvider &Provider, const CString &Application, CStringList &Tokens);
