@@ -122,9 +122,7 @@ namespace Apostol {
 
             SetUser(Config()->User(), Config()->Group());
 
-            InitializePQClient(Application()->Title(), 1, m_MaxMessagesQueue);
-
-            PQClientStart(_T("helper"));
+            InitializePQClients(Application()->Title(), 1, m_MaxMessagesQueue);
 
             SigProcMask(SIG_UNBLOCK, SigAddSet(&set));
 
@@ -134,17 +132,19 @@ namespace Apostol {
 
         void CMessageServer::AfterRun() {
             CApplicationProcess::AfterRun();
-            PQClientStop();
+            PQClientsStop();
         }
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::Run() {
+            auto &PQClient = PQClientStart(_T("helper"));
+
             while (!sig_exiting) {
 
                 Log()->Debug(APP_LOG_DEBUG_EVENT, _T("message server cycle"));
 
                 try {
-                    PQClient().Wait();
+                    PQClient.Wait();
                 } catch (Delphi::Exception::Exception &E) {
                     Log()->Error(APP_LOG_ERR, 0, "%s", E.what());
                 }
@@ -410,7 +410,7 @@ namespace Apostol {
 
             auto pClient = m_MailManager.Add(Config);
 
-            pClient->AllocateEventHandlers(PQClient());
+            pClient->AllocateEventHandlers(GetPQClient());
 
             pClient->ClientName() = Application()->Title();
 
@@ -540,7 +540,7 @@ namespace Apostol {
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::CheckListen() {
-            if (!PQClient().CheckListen(PG_LISTEN_NAME))
+            if (!GetPQClient().CheckListen(PG_LISTEN_NAME))
                 InitListen();
         }
         //--------------------------------------------------------------------------------------------------------------
