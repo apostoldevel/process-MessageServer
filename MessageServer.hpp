@@ -97,12 +97,6 @@ namespace Apostol {
 
             CProcessStatus m_Status;
 
-            CString m_ClientId;
-            CString m_ClientSecret;
-
-            CString m_Session;
-            CString m_Secret;
-
             CStringList m_Sessions;
 
             CString m_Agent;

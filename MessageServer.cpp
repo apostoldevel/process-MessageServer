@@ -558,23 +558,17 @@ namespace Apostol {
                     const auto &login = pqResults[0];
                     const auto &sessions = pqResults[1];
 
-                    const CString oldSession(m_Session);
-
-                    m_Session = login.First()["session"];
-                    m_Secret = login.First()["secret"];
+                    const auto &session = login.First()["session"];
 
                     m_Sessions.Clear();
                     for (int i = 0; i < sessions.Count(); ++i) {
                         m_Sessions.Add(sessions[i]["get_sessions"]);
                     }
 
-                    if (!oldSession.IsEmpty()) {
-                        SignOut(oldSession);
-                    }
-
                     m_AuthDate = Now() + (CDateTime) 24 / HoursPerDay;
-
                     m_Status = psRunning;
+
+                    SignOut(session);
                 } catch (Delphi::Exception::Exception &E) {
                     DoError(E);
                 }
@@ -587,12 +581,12 @@ namespace Apostol {
             const auto &caProviders = Server().Providers();
             const auto &caProvider = caProviders.DefaultValue();
 
-            m_ClientId = caProvider.ClientId(SERVICE_APPLICATION_NAME);
-            m_ClientSecret = caProvider.Secret(SERVICE_APPLICATION_NAME);
+            const auto &clientId = caProvider.ClientId(SERVICE_APPLICATION_NAME);
+            const auto &clientSecret = caProvider.Secret(SERVICE_APPLICATION_NAME);
 
             CStringList SQL;
 
-            api::login(SQL, m_ClientId, m_ClientSecret, m_Agent, m_Host);
+            api::login(SQL, clientId, clientSecret, m_Agent, m_Host);
             api::get_sessions(SQL, API_BOT_USERNAME, m_Agent, m_Host);
 
             try {
@@ -819,9 +813,6 @@ namespace Apostol {
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::DoError(const Delphi::Exception::Exception &E) {
-            m_Session.Clear();
-            m_Secret.Clear();
-
             m_AuthDate = Now() + (CDateTime) SLEEP_SECOND_AFTER_ERROR / SecsPerDay; // 10 sec;
             m_CheckDate = m_AuthDate;
 
