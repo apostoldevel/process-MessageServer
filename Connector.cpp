@@ -284,7 +284,7 @@ namespace Apostol {
             const auto &token = Tokens[provider.empty() ? GOOGLE_PROVIDER_NAME : provider]["access_token"];
 
             if (token.IsEmpty())
-                return;
+                throw Delphi::Exception::Exception(_T("Not found access token"));
 
             auto pMessage = new CMessage();
 

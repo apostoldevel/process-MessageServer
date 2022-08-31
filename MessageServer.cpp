@@ -52,11 +52,20 @@ namespace Apostol {
 
         CMessageHandler::CMessageHandler(CMessageServer *AServer, const CString &Session, const CString &MessageId,
                 COnMessageHandlerEvent &&Handler): CPollConnection(&AServer->QueueManager()), m_Allow(true) {
+
+            m_pClient = nullptr;
             m_pServer = AServer;
             m_Session = Session;
             m_MessageId = MessageId;
             m_Handler = Handler;
+
             AddToQueue();
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        CMessageHandler::~CMessageHandler() {
+            RemoveFromQueue();
+            FreeClient();
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -65,8 +74,8 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        CMessageHandler::~CMessageHandler() {
-            RemoveFromQueue();
+        void CMessageHandler::FreeClient() {
+            FreeAndNil(m_pClient);
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -367,6 +376,7 @@ namespace Apostol {
                 DeleteProgress(AHandler->MessageId());
             }
             delete AHandler;
+            UnloadMessageQueue();
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -388,14 +398,30 @@ namespace Apostol {
         void CMessageServer::UnloadMessageQueue() {
             const auto index = m_Queue.IndexOf(this);
             if (index != -1) {
-                const auto queue = m_Queue[index];
-                for (int i = 0; i < queue->Count(); ++i) {
-                    auto pHandler = (CMessageHandler *) queue->Item(i);
+                const auto pQueue = m_Queue[index];
+                for (int i = 0; i < pQueue->Count(); ++i) {
+                    auto pHandler = (CMessageHandler *) pQueue->Item(i);
                     if (pHandler != nullptr) {
                         pHandler->Handler();
                     }
                     if (m_Progress.Count() >= m_MaxMessagesQueue)
                         break;
+                }
+            }
+        }
+        //--------------------------------------------------------------------------------------------------------------
+
+        void CMessageServer::CheckTimeOut(CDateTime Now) {
+            const auto index = m_Queue.IndexOf(this);
+            if (index != -1) {
+                const auto pQueue = m_Queue[index];
+                for (int i = pQueue->Count() - 1; i >= 0; i--) {
+                    auto pHandler = (CMessageHandler *) pQueue->Item(i);
+                    if (pHandler != nullptr) {
+                        if ((pHandler->TimeOut() > 0) && (Now >= pHandler->TimeOut())) {
+                            DeleteHandler(pHandler);
+                        }
+                    }
                 }
             }
         }
@@ -612,12 +638,15 @@ namespace Apostol {
 
         void CMessageServer::SendMessage(CMessageHandler *AHandler, const TPairs<CString> &Message) {
 
-            auto OnSMTPClient = [this](const CSMTPConfig &Config) {
-                return GetSMTPClient(Config);
+            auto OnSMTPClient = [this, AHandler](const CSMTPConfig &Config) {
+                auto pClient = GetSMTPClient(Config);
+                pClient->Data().Values("session", AHandler->Session());
+                AHandler->Client(pClient);
+                return pClient;
             };
             //----------------------------------------------------------------------------------------------------------
 
-            auto OnHTTPClient = [this](const CLocation &URI) {
+            auto OnHTTPClient = [this, AHandler](const CLocation &URI) {
                 auto pClient = GetClient(URI.hostname, URI.port);
 #if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
                 pClient->OnConnected([this](auto &&Sender) { DoAPIConnected(Sender); });
@@ -626,17 +655,19 @@ namespace Apostol {
                 pClient->OnConnected(std::bind(&CMessageServer::DoAPIConnected, this, _1));
                 pClient->OnDisconnected(std::bind(&CMessageServer::DoAPIDisconnected, this, _1));
 #endif
+                AHandler->Client(pClient);
+
                 return pClient;
             };
             //----------------------------------------------------------------------------------------------------------
 
-            auto OnDone = [this](const CMessage &Message) {
-                DoDone(Message);
+            auto OnDone = [this, AHandler](const CMessage &Message) {
+                DoDone(AHandler);
             };
             //----------------------------------------------------------------------------------------------------------
 
-            auto OnFail = [this](const CMessage &Message, const CString &Error) {
-                DoFail(Message, Error);
+            auto OnFail = [this, AHandler](const CMessage &Message, const CString &Error) {
+                DoFail(AHandler, Error);
             };
             //----------------------------------------------------------------------------------------------------------
 
@@ -708,16 +739,16 @@ namespace Apostol {
                 auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
                 auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
 
-                auto pMessage = dynamic_cast<CMessage *> (pClient->Data().Objects("message"));
-                if (pMessage != nullptr) {
-                    pMessage->Fail(E.what());
-                }
-
                 DebugReply(pConnection->Reply());
 
                 const auto& host = pClient->Host();
 
                 Log()->Error(APP_LOG_ERR, 0, "[%s:%d] %s", host.empty() ? "unknown" : host.c_str(), pClient->Port(), E.what());
+
+                auto pMessage = dynamic_cast<CMessage *> (pClient->Data().Objects("message"));
+                if (pMessage != nullptr) {
+                    pMessage->Fail(E.what());
+                }
             };
 
             //----------------------------------------------------------------------------------------------------------
@@ -729,24 +760,33 @@ namespace Apostol {
             const auto &type = Message["agenttypecode"];
             const auto &agent = Message["agentcode"];
 
-            if (type == "email.agent") {
-                if (agent == "smtp.agent") {
-                    Connectors::CSMTPConnector::Send(AHandler->Session(), Message, m_Configs, OnSMTPClient, OnDone, OnFail);
-                } else {
-                    DeleteHandler(AHandler);
+            try {
+
+                if (type == "email.agent") {
+                    if (agent == "smtp.agent") {
+                        Connectors::CSMTPConnector::Send(AHandler->Session(), Message, m_Configs, OnSMTPClient, OnDone, OnFail);
+                    } else {
+                        DeleteHandler(AHandler);
+                    }
+                } else if (type == "api.agent") {
+                    if (agent == "fcm.agent") {
+                        Connectors::CFCMConnector::Send(AHandler->Session(), Message, m_Profiles["fcm"], m_Tokens,
+                                                        OnHTTPClient, OnFCMExecute, OnException, OnDone, OnFail);
+                    } else if (agent == "m2m.agent") {
+                        Connectors::CM2MConnector::Send(AHandler->Session(), Message, m_Profiles["m2m"], m_Tokens,
+                                                        OnHTTPClient, OnAPIExecute, OnException, OnDone, OnFail);
+                    } else if (agent == "sba.agent") {
+                        Connectors::CSBAConnector::Send(AHandler->Session(), Message, m_Profiles["sba"], m_Tokens,
+                                                        OnHTTPClient, OnAPIExecute, OnException, OnDone, OnFail);
+                    } else if (agent != "bm.agent") {
+                        Connectors::CAPIConnector::Send(AHandler->Session(), Message, m_Profiles["api"], m_Tokens,
+                                                        OnHTTPClient, OnAPIExecute, OnException, OnDone, OnFail);
+                    } else {
+                        DeleteHandler(AHandler);
+                    }
                 }
-            } else if (type == "api.agent") {
-                if (agent == "fcm.agent") {
-                    Connectors::CFCMConnector::Send(AHandler->Session(), Message, m_Profiles["fcm"], m_Tokens, OnHTTPClient, OnFCMExecute, OnException, OnDone, OnFail);
-                } else if (agent == "m2m.agent") {
-                    Connectors::CM2MConnector::Send(AHandler->Session(), Message, m_Profiles["m2m"], m_Tokens, OnHTTPClient, OnAPIExecute, OnException, OnDone, OnFail);
-                } else if (agent == "sba.agent") {
-                    Connectors::CSBAConnector::Send(AHandler->Session(), Message, m_Profiles["sba"], m_Tokens, OnHTTPClient, OnAPIExecute, OnException, OnDone, OnFail);
-                } else if (agent != "bm.agent") {
-                    Connectors::CAPIConnector::Send(AHandler->Session(), Message, m_Profiles["api"], m_Tokens, OnHTTPClient, OnAPIExecute, OnException, OnDone, OnFail);
-                } else {
-                    DeleteHandler(AHandler);
-                }
+            } catch (Delphi::Exception::Exception &E) {
+                DoFail(AHandler, E.what());
             }
         }
         //--------------------------------------------------------------------------------------------------------------
@@ -844,6 +884,7 @@ namespace Apostol {
                         CheckOutbox();
                     }
                 }
+                CheckTimeOut(Now);
             }
         }
         //--------------------------------------------------------------------------------------------------------------
@@ -885,6 +926,7 @@ namespace Apostol {
 
             if (IndexOfProgress(AHandler->MessageId()) >= 0) {
                 Log()->Error(APP_LOG_WARN, 0, "Message %s already in progress.", AHandler->MessageId().c_str());
+                DeleteHandler(AHandler);
                 return;
             }
 
@@ -895,8 +937,11 @@ namespace Apostol {
 
             try {
                 ExecSQL(SQL, AHandler, OnExecuted, OnException);
+
                 AddProgress(AHandler->MessageId());
+
                 AHandler->Allow(false);
+                AHandler->UpdateTimeOut(Now());
             } catch (Delphi::Exception::Exception &E) {
                 DeleteHandler(AHandler);
                 DoError(E);
@@ -951,12 +996,11 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::DoDone(const CMessage &Message) {
+        void CMessageServer::DoDone(CMessageHandler *AHandler) {
 
             auto OnExecuted = [this](CPQPollQuery *APollQuery) {
                 auto pHandler = dynamic_cast<CMessageHandler *> (APollQuery->Binding());
                 DeleteHandler(pHandler);
-                UnloadMessageQueue();
             };
 
             auto OnException = [this](CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
@@ -967,30 +1011,24 @@ namespace Apostol {
 
             CStringList SQL;
 
-            api::authorize(SQL, Message.Session());
+            api::authorize(SQL, AHandler->Session());
+            api::execute_object_action(SQL, AHandler->MessageId(), "done");
 
-            if (!Message.MsgId().IsEmpty()) {
-                api::set_object_label(SQL, Message.MessageId(), Message.MsgId());
-            }
-
-            api::execute_object_action(SQL, Message.MessageId(), "done");
-
-            Log()->Message("[%s] Message sent successfully.", Message.MessageId().c_str());
+            Log()->Message("[%s] Message sent successfully.", AHandler->MessageId().c_str());
 
             try {
-                ExecSQL(SQL, GetMessageHandler(Message.MessageId()), OnExecuted, OnException);
+                ExecSQL(SQL, AHandler, OnExecuted, OnException);
             } catch (Delphi::Exception::Exception &E) {
                 DoError(E);
             }
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::DoFail(const CMessage &Message, const CString &Error) {
+        void CMessageServer::DoFail(CMessageHandler *AHandler, const CString &Error) {
 
             auto OnExecuted = [this](CPQPollQuery *APollQuery) {
                 auto pHandler = dynamic_cast<CMessageHandler *> (APollQuery->Binding());
                 DeleteHandler(pHandler);
-                UnloadMessageQueue();
             };
 
             auto OnException = [this](CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
@@ -1001,14 +1039,14 @@ namespace Apostol {
 
             CStringList SQL;
 
-            api::authorize(SQL, Message.Session());
-            api::set_object_label(SQL, Message.MessageId(), Error);
-            api::execute_object_action(SQL, Message.MessageId(), "fail");
+            api::authorize(SQL, AHandler->Session());
+            api::set_object_label(SQL, AHandler->MessageId(), Error);
+            api::execute_object_action(SQL, AHandler->MessageId(), "fail");
 
-            Log()->Message("[%s] Message was not sent.", Message.MessageId().c_str());
+            Log()->Message("[%s] Message was not sent.", AHandler->MessageId().c_str());
 
             try {
-                ExecSQL(SQL, GetMessageHandler(Message.MessageId()), OnExecuted, OnException);
+                ExecSQL(SQL, AHandler, OnExecuted, OnException);
             } catch (Delphi::Exception::Exception &E) {
                 DoError(E);
             }
@@ -1090,6 +1128,7 @@ namespace Apostol {
             for (int i = 0; i < pClient->Messages().Count(); ++i) {
                 const auto& Message = pClient->Messages()[i];
                 api::set_object_label(SQL, Message.MessageId(), E.what());
+                api::execute_object_action(SQL, Message.MessageId(), "fail");
             }
 
             Log()->Error(APP_LOG_ERR, 0, "%s", E.what());

@@ -48,6 +48,7 @@ namespace Apostol {
         private:
 
             CMessageServer *m_pServer;
+            CAsyncClient *m_pClient;
 
             CString m_Session {};
             CString m_MessageId {};
@@ -59,9 +60,12 @@ namespace Apostol {
             int AddToQueue();
             void RemoveFromQueue();
 
+            void FreeClient();
+
         protected:
 
             void SetAllow(bool Value) { m_Allow = Value; }
+            void SetClient(CAsyncClient *Value) { m_pClient = Value; }
 
         public:
 
@@ -74,6 +78,9 @@ namespace Apostol {
 
             bool Allow() const { return m_Allow; };
             void Allow(bool Value) { SetAllow(Value); };
+
+            CAsyncClient *Client() const { return m_pClient; };
+            void Client(CAsyncClient *Value) { SetClient(Value); };
 
             bool Handler();
 
@@ -144,6 +151,8 @@ namespace Apostol {
             void CheckProviders();
 
             void CheckOutbox();
+            void CheckTimeOut(CDateTime Now);
+
             void UnloadMessageQueue();
 
             void DeleteHandler(CMessageHandler *AHandler);
@@ -165,13 +174,12 @@ namespace Apostol {
 
             void DoError(const Delphi::Exception::Exception &E);
 
-            void DoSend(const CMessage &Message);
-            void DoDone(const CMessage &Message);
-
             void DoMessage(CMessageHandler *AHandler);
+            void DoDone(CMessageHandler *AHandler);
+            void DoFail(CMessageHandler *AHandler, const CString &Error);
 
+            void DoSend(const CMessage &Message);
             void DoCancel(const CMessage &Message, const CString &Error);
-            void DoFail(const CMessage &Message, const CString &Error);
 
             void DoSMTPRequest(CObject *Sender);
             void DoSMTPReply(CObject *Sender);
