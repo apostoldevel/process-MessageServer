@@ -175,7 +175,7 @@ namespace Apostol {
             void DoError(const Delphi::Exception::Exception &E);
 
             void DoMessage(CMessageHandler *AHandler);
-            void DoDone(CMessageHandler *AHandler);
+            void DoDone(CMessageHandler *AHandler, const CString &Label = CString());
             void DoFail(CMessageHandler *AHandler, const CString &Error);
 
             void DoSend(const CMessage &Message);

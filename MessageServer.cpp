@@ -662,7 +662,7 @@ namespace Apostol {
             //----------------------------------------------------------------------------------------------------------
 
             auto OnDone = [this, AHandler](const CMessage &Message) {
-                DoDone(AHandler);
+                DoDone(AHandler, Message.MsgId());
             };
             //----------------------------------------------------------------------------------------------------------
 
@@ -996,7 +996,7 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        void CMessageServer::DoDone(CMessageHandler *AHandler) {
+        void CMessageServer::DoDone(CMessageHandler *AHandler, const CString &Label) {
 
             auto OnExecuted = [this](CPQPollQuery *APollQuery) {
                 auto pHandler = dynamic_cast<CMessageHandler *> (APollQuery->Binding());
@@ -1012,6 +1012,11 @@ namespace Apostol {
             CStringList SQL;
 
             api::authorize(SQL, AHandler->Session());
+
+            if (!Label.IsEmpty()) {
+                api::set_object_label(SQL, AHandler->MessageId(), Label);
+            }
+
             api::execute_object_action(SQL, AHandler->MessageId(), "done");
 
             Log()->Message("[%s] Message sent successfully.", AHandler->MessageId().c_str());
