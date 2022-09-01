@@ -151,8 +151,6 @@ namespace Apostol {
             void CheckProviders();
 
             void CheckOutbox();
-            void CheckTimeOut(CDateTime Now);
-
             void UnloadMessageQueue();
 
             void DeleteHandler(CMessageHandler *AHandler);
@@ -174,12 +172,13 @@ namespace Apostol {
 
             void DoError(const Delphi::Exception::Exception &E);
 
-            void DoMessage(CMessageHandler *AHandler);
-            void DoDone(CMessageHandler *AHandler, const CString &Label = CString());
-            void DoFail(CMessageHandler *AHandler, const CString &Error);
-
             void DoSend(const CMessage &Message);
+            void DoDone(const CMessage &Message);
+
+            void DoMessage(CMessageHandler *AHandler);
+
             void DoCancel(const CMessage &Message, const CString &Error);
+            void DoFail(const CMessage &Message, const CString &Error);
 
             void DoSMTPRequest(CObject *Sender);
             void DoSMTPReply(CObject *Sender);
