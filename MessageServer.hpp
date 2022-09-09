@@ -48,7 +48,6 @@ namespace Apostol {
         private:
 
             CMessageServer *m_pServer;
-            CAsyncClient *m_pClient;
 
             CString m_Session {};
             CString m_MessageId {};
@@ -60,12 +59,9 @@ namespace Apostol {
             int AddToQueue();
             void RemoveFromQueue();
 
-            void FreeClient();
-
         protected:
 
             void SetAllow(bool Value) { m_Allow = Value; }
-            void SetClient(CAsyncClient *Value) { m_pClient = Value; }
 
         public:
 
@@ -78,9 +74,6 @@ namespace Apostol {
 
             bool Allow() const { return m_Allow; };
             void Allow(bool Value) { SetAllow(Value); };
-
-            CAsyncClient *Client() const { return m_pClient; };
-            void Client(CAsyncClient *Value) { SetClient(Value); };
 
             bool Handler();
 

@@ -53,7 +53,6 @@ namespace Apostol {
         CMessageHandler::CMessageHandler(CMessageServer *AServer, const CString &Session, const CString &MessageId,
                 COnMessageHandlerEvent &&Handler): CPollConnection(&AServer->QueueManager()), m_Allow(true) {
 
-            m_pClient = nullptr;
             m_pServer = AServer;
             m_Session = Session;
             m_MessageId = MessageId;
@@ -65,17 +64,11 @@ namespace Apostol {
 
         CMessageHandler::~CMessageHandler() {
             RemoveFromQueue();
-            FreeClient();
         }
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageHandler::Close() {
             RemoveFromQueue();
-        }
-        //--------------------------------------------------------------------------------------------------------------
-
-        void CMessageHandler::FreeClient() {
-            FreeAndNil(m_pClient);
         }
         //--------------------------------------------------------------------------------------------------------------
 
@@ -624,8 +617,8 @@ namespace Apostol {
 
             auto OnSMTPClient = [this, AHandler](const CSMTPConfig &Config) {
                 auto pClient = GetSMTPClient(Config);
+                pClient->AutoFree(true);
                 pClient->Data().Values("session", AHandler->Session());
-                AHandler->Client(pClient);
                 return pClient;
             };
             //----------------------------------------------------------------------------------------------------------
@@ -639,7 +632,7 @@ namespace Apostol {
                 pClient->OnConnected(std::bind(&CMessageServer::DoAPIConnected, this, _1));
                 pClient->OnDisconnected(std::bind(&CMessageServer::DoAPIDisconnected, this, _1));
 #endif
-                AHandler->Client(pClient);
+                pClient->AutoFree(true);
 
                 return pClient;
             };
