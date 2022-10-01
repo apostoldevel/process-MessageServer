@@ -281,6 +281,7 @@ namespace Apostol {
             pClient->OnExecute(OnExecute);
             pClient->OnException(OnException);
 
+            pClient->AutoFree(true);
             pClient->Active(true);
         }
         //--------------------------------------------------------------------------------------------------------------

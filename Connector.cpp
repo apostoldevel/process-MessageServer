@@ -243,6 +243,7 @@ namespace Apostol {
             pClient->OnExecute(std::move(OnExecute));
             pClient->OnException(std::move(OnException));
 
+            pClient->AutoFree(true);
             pClient->Active(true);
         }
 
@@ -313,6 +314,7 @@ namespace Apostol {
             pClient->OnExecute(std::move(OnExecute));
             pClient->OnException(std::move(OnException));
 
+            pClient->AutoFree(true);
             pClient->Active(true);
         }
 
@@ -387,6 +389,7 @@ namespace Apostol {
             pClient->OnExecute(std::move(OnExecute));
             pClient->OnException(std::move(OnException));
 
+            pClient->AutoFree(true);
             pClient->Active(true);
         }
 
@@ -478,6 +481,7 @@ namespace Apostol {
             pClient->OnExecute(std::move(OnExecute));
             pClient->OnException(std::move(OnException));
 
+            pClient->AutoFree(true);
             pClient->Active(true);
         }
     }
