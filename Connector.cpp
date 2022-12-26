@@ -415,7 +415,7 @@ namespace Apostol {
                     CStringList dataForm;
 
                     dataForm.LineBreak("&");
-                    dataForm.Delimiter('&');
+                    dataForm.Delimiter("&");
 
                     dataForm = pMessage->Content();
 
