@@ -185,11 +185,11 @@ namespace Apostol {
             auto OnDone = [&Tokens](CTCPConnection *Sender) {
 
                 auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
-                auto pReply = pConnection->Reply();
+                auto &Reply = pConnection->Reply();
 
-                DebugReply(pReply);
+                DebugReply(Reply);
 
-                const CJSON Json(pReply->Content);
+                const CJSON Json(Reply.Content);
 
                 Tokens.Values("access_token", Json["access_token"].AsString());
 
@@ -226,29 +226,29 @@ namespace Apostol {
 
             Log()->Error(APP_LOG_INFO, 0, _T("Trying to fetch public keys from: %s"), URI.c_str());
 
-            auto OnRequest = [&Provider, &Application](CHTTPClient *Sender, CHTTPRequest *ARequest) {
+            auto OnRequest = [&Provider, &Application](CHTTPClient *Sender, CHTTPRequest &Request) {
                 const auto& client_x509_cert_url = std::string(Provider.Applications()[Application]["client_x509_cert_url"].AsString());
 
                 Provider.KeyStatusTime(Now());
                 Provider.KeyStatus(ksFetching);
 
                 CLocation Location(client_x509_cert_url);
-                CHTTPRequest::Prepare(ARequest, "GET", Location.pathname.c_str());
+                CHTTPRequest::Prepare(Request, "GET", Location.pathname.c_str());
             };
 
             auto OnExecute = [this, &Provider, &Application](CTCPConnection *AConnection) {
 
                 auto pConnection = dynamic_cast<CHTTPClientConnection *> (AConnection);
-                auto pReply = pConnection->Reply();
+                auto &Reply = pConnection->Reply();
 
                 try {
                     DebugRequest(pConnection->Request());
-                    DebugReply(pReply);
+                    DebugReply(Reply);
 
                     Provider.KeyStatusTime(Now());
 
                     Provider.Keys().Clear();
-                    Provider.Keys() << pReply->Content;
+                    Provider.Keys() << Reply.Content;
 
                     Provider.KeyStatus(ksSuccess);
 
@@ -654,13 +654,13 @@ namespace Apostol {
                 auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
                 auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
 
-                auto pReply = pConnection->Reply();
+                auto &Reply = pConnection->Reply();
 
-                DebugReply(pReply);
+                DebugReply(Reply);
 
                 auto pMessage = dynamic_cast<CMessage *> (pClient->Data().Objects("message"));
                 if (pMessage != nullptr) {
-                    const CJSON Json(pReply->Content);
+                    const CJSON Json(Reply.Content);
 
                     if (Json.HasOwnProperty("error")) {
                         const auto& error = Json["error"];
@@ -684,9 +684,9 @@ namespace Apostol {
                 auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
                 auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
 
-                auto pReply = pConnection->Reply();
+                auto &Reply = pConnection->Reply();
 
-                DebugReply(pReply);
+                DebugReply(Reply);
 
                 auto pMessage = dynamic_cast<CMessage *> (pClient->Data().Objects("message"));
                 if (pMessage != nullptr) {
@@ -698,7 +698,7 @@ namespace Apostol {
 
                     api::authorize(SQL, pMessage->Session());
                     api::set_session_area(SQL, area);
-                    api::add_inbox(SQL, pMessage->MessageId(), agent, CString(), pMessage->From(), pMessage->To().First(), pMessage->Subject(), pReply->Content);
+                    api::add_inbox(SQL, pMessage->MessageId(), agent, CString(), pMessage->From(), pMessage->To().First(), pMessage->Subject(), Reply.Content);
 
                     try {
                         ExecSQL(SQL);

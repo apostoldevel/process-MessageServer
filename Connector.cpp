@@ -169,7 +169,7 @@ namespace Apostol {
                 COnSocketExecuteEvent &&OnExecute, COnSocketExceptionEvent &&OnException,
                 COnMessageEvent &&OnDone, COnMessageErrorEvent &&OnFail) {
 
-            auto OnRequest = [](CHTTPClient *Sender, CHTTPRequest *ARequest) {
+            auto OnRequest = [](CHTTPClient *Sender, CHTTPRequest &Request) {
 
                 const auto &uri = Sender->Data()["uri"];
                 const auto &auth = Sender->Data()["auth"];
@@ -178,16 +178,16 @@ namespace Apostol {
 
                 auto pMessage = dynamic_cast<CMessage *> (Sender->Data().Objects("message"));
                 if (pMessage != nullptr) {
-                    ARequest->Content = pMessage->Content();
+                    Request.Content = pMessage->Content();
                 }
 
-                CHTTPRequest::Prepare(ARequest, _T("POST"), uri.c_str(), content_type.empty() ? _T("application/json") : content_type.c_str());
+                CHTTPRequest::Prepare(Request, _T("POST"), uri.c_str(), content_type.empty() ? _T("application/json") : content_type.c_str());
 
                 if (!token.IsEmpty()) {
-                    ARequest->AddHeader(_T("Authorization"), (auth.empty() ? _T("Bearer") : auth) + " " + token);
+                    Request.AddHeader(_T("Authorization"), (auth.empty() ? _T("Bearer") : auth) + " " + token);
                 }
 
-                DebugRequest(ARequest);
+                DebugRequest(Request);
             };
 
             const auto &id = Data["id"];
@@ -258,21 +258,21 @@ namespace Apostol {
                 COnSocketExecuteEvent &&OnExecute, COnSocketExceptionEvent &&OnException,
                 COnMessageEvent &&OnDone, COnMessageErrorEvent &&OnFail) {
 
-            auto OnRequest = [](CHTTPClient *Sender, CHTTPRequest *ARequest) {
+            auto OnRequest = [](CHTTPClient *Sender, CHTTPRequest &Request) {
 
                 const auto &uri = Sender->Data()["uri"];
                 const auto &token = Sender->Data()["token"];
 
                 auto pMessage = dynamic_cast<CMessage *> (Sender->Data().Objects("message"));
                 if (pMessage != nullptr) {
-                    ARequest->Content = pMessage->Content();
+                    Request.Content = pMessage->Content();
                 }
 
-                CHTTPRequest::Prepare(ARequest, _T("POST"), uri.c_str(), _T("application/json"));
+                CHTTPRequest::Prepare(Request, _T("POST"), uri.c_str(), _T("application/json"));
 
-                ARequest->AddHeader("Authorization", "Bearer " + token);
+                Request.AddHeader("Authorization", "Bearer " + token);
 
-                DebugRequest(ARequest);
+                DebugRequest(Request);
             };
 
             const auto &id = Data["id"];
@@ -329,21 +329,21 @@ namespace Apostol {
                 COnSocketExecuteEvent &&OnExecute, COnSocketExceptionEvent &&OnException,
                 COnMessageEvent &&OnDone, COnMessageErrorEvent &&OnFail) {
 
-            auto OnRequest = [](CHTTPClient *Sender, CHTTPRequest *ARequest) {
+            auto OnRequest = [](CHTTPClient *Sender, CHTTPRequest &Request) {
 
                 const auto &uri = Sender->Data()["uri"];
                 const auto &token = Sender->Data()["token"];
 
                 auto pMessage = dynamic_cast<CMessage *> (Sender->Data().Objects("message"));
                 if (pMessage != nullptr) {
-                    ARequest->Content = pMessage->Content();
+                    Request.Content = pMessage->Content();
                 }
 
-                CHTTPRequest::Prepare(ARequest, _T("POST"), uri.c_str(), _T("application/soap+xml; charset=utf-8"));
+                CHTTPRequest::Prepare(Request, _T("POST"), uri.c_str(), _T("application/soap+xml; charset=utf-8"));
 
-                ARequest->AddHeader("Authorization", "Bearer " + token);
+                Request.AddHeader("Authorization", "Bearer " + token);
 
-                DebugRequest(ARequest);
+                DebugRequest(Request);
             };
 
             const auto &id = Data["id"];
@@ -404,7 +404,7 @@ namespace Apostol {
                 COnSocketExecuteEvent &&OnExecute, COnSocketExceptionEvent &&OnException,
                 COnMessageEvent &&OnDone, COnMessageErrorEvent &&OnFail) {
 
-            auto OnRequest = [](CHTTPClient *Sender, CHTTPRequest *ARequest) {
+            auto OnRequest = [](CHTTPClient *Sender, CHTTPRequest &Request) {
 
                 const auto &uri = Sender->Data()["uri"];
                 const auto &username = Sender->Data()["username"];
@@ -428,12 +428,12 @@ namespace Apostol {
                         dataForm.Values(name, CHTTPServer::URLEncode(value));
                     }
 
-                    ARequest->Content = dataForm.Text();
+                    Request.Content = dataForm.Text();
                 }
 
-                CHTTPRequest::Prepare(ARequest, _T("POST"), uri.c_str(), _T("application/x-www-form-urlencoded"));
+                CHTTPRequest::Prepare(Request, _T("POST"), uri.c_str(), _T("application/x-www-form-urlencoded"));
 
-                DebugRequest(ARequest);
+                DebugRequest(Request);
             };
 
             const auto &id = Data["id"];
