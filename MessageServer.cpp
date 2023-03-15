@@ -2,7 +2,7 @@
 
 Program name:
 
-  Apostol Web Service
+  Apostol CRM
 
 Module Name:
 
@@ -828,7 +828,7 @@ namespace Apostol {
             m_Status = psStopped;
 
             Log()->Error(APP_LOG_ERR, 0, "%s", E.what());
-            Log()->Notice("Continue after %d seconds", SLEEP_SECOND_AFTER_ERROR);
+            Log()->Notice("[MessageServer] Continue after %d seconds", SLEEP_SECOND_AFTER_ERROR);
         }
         //--------------------------------------------------------------------------------------------------------------
 
