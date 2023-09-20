@@ -236,6 +236,7 @@ namespace Apostol {
 
             pClient->Data().Values("agent", agent);
             pClient->Data().Values("area", area);
+            pClient->Data().Values("state", "created");
 
             pClient->Data().AddObject("message", pMessage);
 
@@ -307,6 +308,7 @@ namespace Apostol {
 
             pClient->Data().Values("uri", URI.pathname);
             pClient->Data().Values("token", token);
+            pClient->Data().Values("state", "created");
 
             pClient->Data().AddObject("message", pMessage);
 
@@ -382,6 +384,7 @@ namespace Apostol {
 
             pClient->Data().Values("agent", agent);
             pClient->Data().Values("area", area);
+            pClient->Data().Values("state", "created");
 
             pClient->Data().AddObject("message", pMessage);
 
@@ -474,6 +477,7 @@ namespace Apostol {
 
             pClient->Data().Values("agent", agent);
             pClient->Data().Values("area", area);
+            pClient->Data().Values("state", "created");
 
             pClient->Data().AddObject("message", pMessage);
 

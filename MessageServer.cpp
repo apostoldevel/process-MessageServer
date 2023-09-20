@@ -622,7 +622,7 @@ namespace Apostol {
             };
             //----------------------------------------------------------------------------------------------------------
 
-            auto OnHTTPClient = [this, AHandler](const CLocation &URI) {
+            auto OnHTTPClient = [this](const CLocation &URI) {
                 auto pClient = GetClient(URI.hostname, URI.port);
 #if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
                 pClient->OnConnected([this](auto &&Sender) { DoAPIConnected(Sender); });
@@ -661,6 +661,8 @@ namespace Apostol {
                     const CJSON Json(Reply.Content);
 
                     if (Json.HasOwnProperty("error")) {
+                        pClient->Data().Values("state", "fail");
+
                         const auto& error = Json["error"];
                         const auto& code = error["code"].AsInteger();
                         const auto& message = error["message"].AsString();
@@ -668,6 +670,8 @@ namespace Apostol {
 
                         pMessage->Fail(CString().Format("[%d] %s: %s", code, status.c_str(), message.c_str()));
                     } else {
+                        pClient->Data().Values("state", "done");
+
                         pMessage->MsgId() = Json["name"].AsString();
                         pMessage->Done();
                     }
@@ -681,6 +685,8 @@ namespace Apostol {
 
                 auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
                 auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
+
+                pClient->Data().Values("state", "done");
 
                 auto &Reply = pConnection->Reply();
 
@@ -714,6 +720,8 @@ namespace Apostol {
 
                 auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
                 auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
+
+                pClient->Data().Values("state", "fail");
 
                 DebugReply(pConnection->Reply());
 
@@ -1069,6 +1077,9 @@ namespace Apostol {
                 if (Assigned(pClient)) {
                     auto pMessage = dynamic_cast<CMessage *> (pClient->Data().Objects("message"));
                     chASSERT(pMessage);
+                    if (pClient->Data()["state"] == "created") {
+                        pMessage->Fail("Connection timeout expired.");
+                    }
                     delete pMessage;
                 }
                 auto pSocket = pConnection->Socket();
