@@ -957,7 +957,7 @@ namespace Apostol {
             api::set_object_label(SQL, Message.MessageId(), Error);
             api::execute_object_action(SQL, Message.MessageId(), "cancel");
 
-            Log()->Message("[%s] Sent message canceled.", Message.MessageId().c_str());
+            Log()->Message("[%s] Sent message cancelled.", Message.MessageId().c_str());
 
             try {
                 ExecSQL(SQL);
