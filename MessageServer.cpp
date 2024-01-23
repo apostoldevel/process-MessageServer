@@ -99,7 +99,7 @@ namespace Apostol {
         CMessageServer::CMessageServer(CCustomProcess *AParent, CApplication *AApplication):
                 inherited(AParent, AApplication, "message server") {
 
-            m_Agent.Format("Message Server (%s)", Application()->Title().c_str());
+            m_Agent = CString().Format("%s (%s)", GApplication->Title().c_str(), ProcessName().c_str());
             m_Host = CApostolModule::GetIPByHostName(CApostolModule::GetHostName());
 
             m_AuthDate = 0;
