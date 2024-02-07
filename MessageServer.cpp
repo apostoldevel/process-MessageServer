@@ -35,6 +35,7 @@ Author:
 
 #define SLEEP_SECOND_AFTER_ERROR 10
 
+#define PG_CONFIG_NAME "helper"
 #define PG_LISTEN_NAME "outbox"
 //----------------------------------------------------------------------------------------------------------------------
 
@@ -137,7 +138,7 @@ namespace Apostol {
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::Run() {
-            auto &PQClient = PQClientStart(_T("helper"));
+            auto &PQClient = PQClientStart(PG_CONFIG_NAME);
 
             while (!sig_exiting) {
 
@@ -412,7 +413,7 @@ namespace Apostol {
 
             auto pClient = m_MailManager.Add(Config);
 
-            pClient->AllocateEventHandlers(GetPQClient());
+            pClient->AllocateEventHandlers(GetPQClient(PG_CONFIG_NAME));
 
             pClient->ClientName() = Application()->Title();
 
@@ -534,7 +535,7 @@ namespace Apostol {
             SQL.Add("LISTEN " PG_LISTEN_NAME ";");
 
             try {
-                ExecSQL(SQL, nullptr, OnExecuted, OnException);
+                ExecSQL(SQL, nullptr, OnExecuted, OnException, PG_CONFIG_NAME);
             } catch (Delphi::Exception::Exception &E) {
                 DoError(E);
             }
@@ -542,7 +543,7 @@ namespace Apostol {
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::CheckListen() {
-            if (!GetPQClient().CheckListen(PG_LISTEN_NAME))
+            if (!GetPQClient(PG_CONFIG_NAME).CheckListen(PG_LISTEN_NAME))
                 InitListen();
         }
         //--------------------------------------------------------------------------------------------------------------
