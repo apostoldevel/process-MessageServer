@@ -411,7 +411,7 @@ namespace Apostol {
 
         CSMTPClient *CMessageServer::GetSMTPClient(const CSMTPConfig &Config) {
 
-            auto pClient = m_MailManager.Add(Config);
+            const auto pClient = m_MailManager.Add(Config);
 
             pClient->AllocateEventHandlers(GetPQClient(PG_CONFIG_NAME));
 
@@ -420,7 +420,7 @@ namespace Apostol {
             pClient->AutoConnect(true);
 
 #if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
-            pClient->OnVerbose([this](auto && Sender, auto && AConnection, auto && AFormat, auto && args) { DoVerbose(Sender, AConnection, AFormat, args); });
+            //pClient->OnVerbose([this](auto && Sender, auto && AFormat, auto && args) { DoVerbose(Sender, AFormat, args); });
             pClient->OnAccessLog([this](auto && AConnection) { DoAccessLog(AConnection); });
             pClient->OnException([this](auto && AConnection, auto && AException) { DoException(AConnection, AException); });
             pClient->OnEventHandlerException([this](auto && AHandler, auto && AException) { DoServerEventHandlerException(AHandler, AException); });
@@ -431,7 +431,7 @@ namespace Apostol {
             pClient->OnRequest([this](auto && Sender) { DoSMTPRequest(Sender); });
             pClient->OnReply([this](auto && Sender) { DoSMTPReply(Sender); });
 #else
-            pClient->OnVerbose(std::bind(&CMessageServer::DoVerbose, this, _1, _2, _3, _4));
+            //pClient->OnVerbose(std::bind(&CMessageServer::DoVerbose, this, _1, _2, _3));
             pClient->OnAccessLog(std::bind(&CMessageServer::DoAccessLog, this, _1));
             pClient->OnException(std::bind(&CMessageServer::DoException, this, _1, _2));
             pClient->OnEventHandlerException(std::bind(&CMessageServer::DoServerEventHandlerException, this, _1, _2));
