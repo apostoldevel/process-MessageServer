@@ -2,76 +2,149 @@
 
 Сервер сообщений
 -
-**MessageServer** — процесс для [Apostol](https://github.com/apostoldevel/apostol) + [db-platform](https://github.com/apostoldevel/db-platform) — **Apostol CRM**[^crm].
+
+**Процесс** для [Apostol](https://github.com/apostoldevel/apostol) + [db-platform](https://github.com/apostoldevel/db-platform) — **Apostol CRM**[^crm].
 
 Описание
 -
-**MessageServer** — долгоживущий фоновый процесс, который доставляет исходящие сообщения из таблицы исходящих сообщений PostgreSQL во внешние сервисы. Авторизуется как `apibot`, опрашивает очередь сообщений и отправляет каждое сообщение через соответствующий коннектор, выбираемый по типу агента.
 
-Процесс работает независимо внутри мастер-процесса Апостол, используя общий цикл событий на основе `epoll` — без потоков, без блокирующего ввода-вывода.
+**Сервер сообщений** — фоновый процесс-модуль для фреймворка [Апостол](https://github.com/apostoldevel/apostol). Запускается как отдельный форкнутый процесс и доставляет исходящие сообщения из PostgreSQL-таблицы outbox на внешние сервисы (SMTP email, FCM push-уведомления, HTTP API).
 
-Принцип работы
--
-1. Авторизуется через OAuth2 `client_credentials` как `apibot`; повторная авторизация каждые 24 часа.
-2. Подписывается на PostgreSQL-канал уведомлений `outbox` через `LISTEN outbox`.
-3. Каждую минуту опрашивает `api.outbox('prepared')` для получения сообщений из очереди.
-4. Для каждого сообщения получает полные данные через `api.get_service_message(id)` и отправляет через соответствующий коннектор.
-5. При успехе — вызывает `api.execute_object_action(id, 'done')`.
-6. При ошибке — записывает текст ошибки и вызывает `api.execute_object_action(id, 'fail')`.
+Основные характеристики:
 
-Агенты сообщений
--
-Выбор коннектора определяется двумя полями в записи сообщения: `agenttypecode` и `agentcode`.
+* Написан на C++20 с использованием асинхронной неблокирующей модели ввода-вывода на базе **epoll** API.
+* Подключается к **PostgreSQL** через `libpq`, используя роль `apibot` (пул соединений helper).
+* Аутентифицируется через OAuth2 `client_credentials` с помощью `BotSession`.
+* **NOTIFY-driven**: подписывается на PostgreSQL-канал `LISTEN outbox` для немедленной обработки.
+* **Polling-fallback**: каждую минуту проверяет `api.outbox('prepared')` для обнаружения пропущенных уведомлений.
+* **Контроль параллелизма**: параметр `max_in_flight` ограничивает количество одновременно обрабатываемых сообщений, предотвращая перегрузку при массовых рассылках.
+* Использует `SmtpClient` (STARTTLS) для доставки email и `FetchClient` для HTTP-коннекторов (FCM, generic API).
 
-| Тип агента | Код агента | Коннектор | Транспорт |
-|------------|-----------|-----------|-----------|
-| `email.agent` | `smtp.agent` | `CSMTPConnector` | Электронная почта по SMTP |
-| `api.agent` | `fcm.agent` | `CFCMConnector` | Push-уведомления через Firebase Cloud Messaging |
-| `api.agent` | `m2m.agent` | `CM2MConnector` | SMS через МТС Коммуникатор (M2M API) |
-| `api.agent` | `sba.agent` | `CSBAConnector` | Интернет-эквайринг Сбербанка |
-| `api.agent` | _(другой)_ | `CAPIConnector` | Универсальный HTTP API-вызов |
+### Архитектура
 
-Ответы от HTTP API-коннекторов сохраняются во входящих через `api.add_inbox`.
+Сервер сообщений следует паттерну **ProcessModule**, введённому в apostol.v2:
 
-Токены провайдеров (OAuth2 / сервисные аккаунты Google) загружаются при запуске и обновляются каждые 55 минут.
-
-Настройка
--
-Включите процесс и укажите конфигурационные файлы коннекторов в конфигурации Апостол:
-
-```ini
-[process/MessageServer]
-enable=true
-smtp=conf/smtp.conf      # SMTP-сервер(ы)
-fcm=conf/fcm.conf        # Учётные данные Firebase Cloud Messaging
-m2m=conf/m2m.conf        # Учётные данные МТС Коммуникатор (M2M)
-sba=conf/sba.conf        # Учётные данные Сбербанк-эквайринг
-api=conf/api.conf        # Настройки универсального API-коннектора
+```
+Application
+  └── ModuleProcess (generic-оболочка процесса: сигналы, EventLoop, PgPool)
+        └── MessageServer (ProcessModule: только бизнес-логика)
 ```
 
-Каждый ключ в секции `[process/MessageServer]` (кроме `enable`) воспринимается как имя профиля, указывающего на файл конфигурации коннектора. Профили, содержащие поле `oauth2`, инициируют автоматическую загрузку OAuth2-провайдеров.
+Жизненный цикл процесса (обработка сигналов, crash recovery, настройка PgPool, таймер heartbeat) управляется generic-оболочкой `ModuleProcess`. `MessageServer` содержит только логику доставки сообщений.
+
+### Как это работает
+
+```
+heartbeat (1 сек)
+  └── BotSession::refresh_if_needed()
+  └── если аутентифицирован:
+        └── process_notify_queue()  — немедленная обработка NOTIFY
+        └── если now >= next_check_ (1 мин):
+              └── check_outbox()    — polling-fallback
+                    └── api.authorize(session)
+                    └── api.outbox('prepared') ORDER BY created
+                    └── enum_messages():
+                          для каждого сообщения (в пределах лимита параллелизма):
+                            do_fetch(id) → api.get_service_message(id)
+                              └── dispatch_message(id, data)
+                                    email.agent/smtp.agent → send_smtp()
+                                    api.agent/fcm.agent    → send_fcm()
+                                    api.agent/*            → send_api()
+
+NOTIFY "outbox" → on_notify(payload):
+  payload = UUID сообщения
+  если !in_progress → pending_messages_.push(id)
+  → обрабатывается на следующем heartbeat
+```
+
+### Агенты сообщений
+
+| Тип агента | Код агента | Транспорт | Реализация v2 |
+|------------|-----------|-----------|---------------|
+| `email.agent` | `smtp.agent` | SMTP email | `SmtpClient` (STARTTLS) |
+| `api.agent` | `fcm.agent` | Firebase Cloud Messaging | `FetchClient` HTTP POST |
+| `api.agent` | _(другие)_ | Общий HTTP API | `FetchClient` HTTP POST |
+
+### Машина состояний сообщения (db-platform)
+
+```
+created ──submit──► prepared ──send──► sending ──done──► done
+                                                ──fail──► failed
+```
 
 Модуль базы данных
 -
-MessageServer тесно связан с модулем **`message`** платформы [db-platform](https://github.com/apostoldevel/db-platform) (`db/sql/platform/entity/object/document/message/`).
+
+MessageServer связан с модулем **`message`** платформы [db-platform](https://github.com/apostoldevel/db-platform).
 
 Ключевые объекты базы данных:
 
 | Объект | Назначение |
 |--------|-----------|
-| `db.message` | Запись сообщения: агент, профиль (домен/провайдер отправителя), адрес (получатель), тема, содержимое |
-| Субсущность `outbox` | Очередь исходящих сообщений с конечным автоматом; отправляет `NOTIFY 'outbox'` при переходе сообщения в состояние prepared |
+| `db.message` | Запись сообщения: агент, профиль, адрес, тема, содержание |
+| `outbox` | Под-сущность: очередь исходящих; отправляет `NOTIFY 'outbox'` при submit |
 | `api.outbox(state)` | Возвращает сообщения в заданном состоянии (обычно `'prepared'`) |
 | `api.get_service_message(id)` | Получает полные данные сообщения для отправки |
-| `api.execute_object_action(id, action)` | Переходы состояний: `'send'`, `'done'`, `'fail'`, `'cancel'` |
-| `api.add_inbox(...)` | Сохраняет ответ HTTP API как входящую запись |
+| `api.execute_object_action(id, action)` | Переходы состояний: `'send'`, `'done'`, `'fail'` |
+| `api.set_object_label(id, label)` | Сохранить внешний ID сообщения или текст ошибки |
 
-Связанные модули
+Конфигурация
 -
-- **PGFetch** — HTTP-клиент, используемый API-коннекторами (FCM, M2M, SBA, универсальный API)
+
+В конфигурационном файле приложения (`conf/apostol.json`):
+
+```json
+{
+  "module": {
+    "MessageServer": {
+      "enable": true,
+      "heartbeat": 60000,
+      "max_in_flight": 10,
+      "smtp": {
+        "default": {
+          "host": "smtp.example.com",
+          "port": 587,
+          "username": "noreply@example.com",
+          "password": "secret"
+        }
+      },
+      "fcm": {
+        "default": {
+          "uri": "https://fcm.googleapis.com/v1/projects/my-project/messages:send",
+          "token": "ya29.access-token"
+        }
+      },
+      "api": {
+        "profile_name": {
+          "uri": "https://api.example.com",
+          "auth": "Bearer",
+          "token": "api-key",
+          "content_type": "application/json"
+        }
+      }
+    }
+  }
+}
+```
+
+| Параметр | Тип | По умолчанию | Описание |
+|----------|-----|-------------|----------|
+| `enable` | bool | `false` | Включить/отключить процесс |
+| `heartbeat` | int | `60000` | Интервал проверки outbox в миллисекундах |
+| `max_in_flight` | int | `10` | Максимум одновременных отправок |
+| `smtp` | object | — | Профили SMTP-серверов (имя → host/port/credentials) |
+| `fcm` | object | — | Профили FCM (имя → uri/token) |
+| `api` | object | — | Профили generic API (имя → uri/auth/token) |
+
+Также необходимы:
+* Строка подключения `postgres.helper` в конфигурации
+* Учётные данные OAuth2 `service` в файле `conf/oauth2/default.json`
+
+Требования к сборке: `WITH_POSTGRESQL`, `WITH_SSL` — оба должны быть включены.
 
 Установка
 -
-Следуйте указаниям по сборке и установке [Апостол](https://github.com/apostoldevel/apostol#%D1%81%D0%B1%D0%BE%D1%80%D0%BA%D0%B0-%D0%B8-%D1%83%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BA%D0%B0).
+
+Следуйте указаниям по сборке и установке [Апостол](https://github.com/apostoldevel/apostol#building-and-installation).
 
 [^crm]: **Apostol CRM** — абстрактный термин, а не самостоятельный продукт. Он обозначает любой проект, в котором совместно используются фреймворк [Apostol](https://github.com/apostoldevel/apostol) (C++) и [db-platform](https://github.com/apostoldevel/db-platform) через специально разработанные модули и процессы. Каждый фреймворк можно использовать независимо; вместе они образуют полноценную backend-платформу.

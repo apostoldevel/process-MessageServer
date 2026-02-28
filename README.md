@@ -2,76 +2,149 @@
 
 Message Server
 -
-**MessageServer** is a process for [Apostol](https://github.com/apostoldevel/apostol) + [db-platform](https://github.com/apostoldevel/db-platform) — **Apostol CRM**[^crm].
+
+**Process** for [Apostol](https://github.com/apostoldevel/apostol) + [db-platform](https://github.com/apostoldevel/db-platform) — **Apostol CRM**[^crm].
 
 Description
 -
-**MessageServer** is a long-running background process that delivers outbound messages from a PostgreSQL outbox table to external services. It authenticates as `apibot`, polls the message queue, and dispatches each message through the appropriate connector based on the message agent type.
 
-The process runs independently inside the Apostol master process, sharing the same `epoll`-based event loop — no threads, no blocking I/O.
+**Message Server** is a background process module for the [Apostol](https://github.com/apostoldevel/apostol) framework. It runs as an independent forked process and delivers outbound messages from a PostgreSQL outbox table to external services (SMTP email, FCM push notifications, generic HTTP APIs).
 
-How it works
--
-1. Authenticates via OAuth2 `client_credentials` as `apibot`; re-authenticates every 24 hours.
-2. Subscribes to the PostgreSQL `outbox` notify channel via `LISTEN outbox`.
-3. Polls `api.outbox('prepared')` every minute for queued messages.
-4. For each message, fetches full details via `api.get_service_message(id)` and dispatches through the matching connector.
-5. On success — calls `api.execute_object_action(id, 'done')`.
-6. On failure — records the error label and calls `api.execute_object_action(id, 'fail')`.
+Key characteristics:
 
-Message agents
--
-Dispatch is driven by two fields in the message record: `agenttypecode` and `agentcode`.
+* Written in C++20 using an asynchronous, non-blocking I/O model based on the **epoll** API.
+* Connects to **PostgreSQL** via `libpq` using the `apibot` database role (helper connection pool).
+* Authenticates via OAuth2 `client_credentials` grant using `BotSession`.
+* **NOTIFY-driven**: subscribes to PostgreSQL `LISTEN outbox` channel for immediate dispatch.
+* **Polling fallback**: checks `api.outbox('prepared')` every minute to catch missed notifications.
+* **Concurrency control**: `max_in_flight` parameter bounds the number of messages being processed simultaneously, preventing overload during mass mailings.
+* Uses `SmtpClient` (STARTTLS) for email delivery and `FetchClient` for HTTP-based connectors (FCM, generic API).
 
-| Agent type | Agent code | Connector | Transport |
-|------------|-----------|-----------|-----------|
-| `email.agent` | `smtp.agent` | `CSMTPConnector` | SMTP email |
-| `api.agent` | `fcm.agent` | `CFCMConnector` | Firebase Cloud Messaging (push notifications) |
-| `api.agent` | `m2m.agent` | `CM2MConnector` | SMS via МТС Communicator (M2M API) |
-| `api.agent` | `sba.agent` | `CSBAConnector` | Sberbank internet acquiring API |
-| `api.agent` | _(other)_ | `CAPIConnector` | Generic HTTP API call |
+### Architecture
 
-Responses from HTTP API connectors are saved to the inbox via `api.add_inbox`.
+Message Server follows the **ProcessModule** pattern introduced in apostol.v2:
 
-Provider tokens (OAuth2 / Google service accounts) are fetched on startup and refreshed every 55 minutes.
-
-Configuration
--
-Enable the process and specify connector config files in the Apostol configuration:
-
-```ini
-[process/MessageServer]
-enable=true
-smtp=conf/smtp.conf      # SMTP server(s)
-fcm=conf/fcm.conf        # Firebase Cloud Messaging credentials
-m2m=conf/m2m.conf        # МТС Communicator (M2M) credentials
-sba=conf/sba.conf        # Sberbank acquiring credentials
-api=conf/api.conf        # Generic API connector settings
+```
+Application
+  └── ModuleProcess (generic process shell: signals, EventLoop, PgPool)
+        └── MessageServer (ProcessModule: business logic only)
 ```
 
-Each key under `[process/MessageServer]` (except `enable`) is treated as a profile name pointing to a connector config file. Profiles containing an `oauth2` field trigger automatic OAuth2 provider loading.
+The process lifecycle (signal handling, crash recovery, PgPool setup, heartbeat timer) is managed by the generic `ModuleProcess` shell. `MessageServer` only contains the message dispatch logic.
+
+### How it works
+
+```
+heartbeat (1s)
+  └── BotSession::refresh_if_needed()
+  └── if authenticated:
+        └── process_notify_queue()  — immediate NOTIFY dispatch
+        └── if now >= next_check_ (1 min):
+              └── check_outbox()    — polling fallback
+                    └── api.authorize(session)
+                    └── api.outbox('prepared') ORDER BY created
+                    └── enum_messages():
+                          for each message (under concurrency limit):
+                            do_fetch(id) → api.get_service_message(id)
+                              └── dispatch_message(id, data)
+                                    email.agent/smtp.agent → send_smtp()
+                                    api.agent/fcm.agent    → send_fcm()
+                                    api.agent/*            → send_api()
+
+NOTIFY "outbox" → on_notify(payload):
+  payload = message UUID
+  if !in_progress → pending_messages_.push(id)
+  → processed on next heartbeat
+```
+
+### Message agents
+
+| Agent type | Agent code | Transport | v2 implementation |
+|------------|-----------|-----------|-------------------|
+| `email.agent` | `smtp.agent` | SMTP email | `SmtpClient` (STARTTLS) |
+| `api.agent` | `fcm.agent` | Firebase Cloud Messaging | `FetchClient` HTTP POST |
+| `api.agent` | _(other)_ | Generic HTTP API | `FetchClient` HTTP POST |
+
+### Message state machine (db-platform)
+
+```
+created ──submit──► prepared ──send──► sending ──done──► done
+                                                ──fail──► failed
+```
 
 Database module
 -
-MessageServer is tightly coupled to the **`message`** module of [db-platform](https://github.com/apostoldevel/db-platform) (`db/sql/platform/entity/object/document/message/`).
+
+MessageServer is coupled to the **`message`** module of [db-platform](https://github.com/apostoldevel/db-platform).
 
 Key database objects:
 
 | Object | Purpose |
 |--------|---------|
-| `db.message` | Message record: agent, profile (sender domain/provider), address (recipient), subject, content |
-| `outbox` sub-entity | Queued outbound messages with state machine; fires `NOTIFY 'outbox'` when a message enters prepared state |
+| `db.message` | Message record: agent, profile, address, subject, content |
+| `outbox` | Sub-entity: queued outbound messages; fires `NOTIFY 'outbox'` on submit |
 | `api.outbox(state)` | Returns messages in the given state (typically `'prepared'`) |
 | `api.get_service_message(id)` | Fetches full message details for dispatch |
-| `api.execute_object_action(id, action)` | State transitions: `'send'`, `'done'`, `'fail'`, `'cancel'` |
-| `api.add_inbox(...)` | Stores the HTTP API response as an inbound record |
+| `api.execute_object_action(id, action)` | State transitions: `'send'`, `'done'`, `'fail'` |
+| `api.set_object_label(id, label)` | Store external message ID or error text |
 
-Related modules
+Configuration
 -
-- **PGFetch** — HTTP client used internally by API-based connectors (FCM, M2M, SBA, generic API)
+
+In the application config (`conf/apostol.json`):
+
+```json
+{
+  "module": {
+    "MessageServer": {
+      "enable": true,
+      "heartbeat": 60000,
+      "max_in_flight": 10,
+      "smtp": {
+        "default": {
+          "host": "smtp.example.com",
+          "port": 587,
+          "username": "noreply@example.com",
+          "password": "secret"
+        }
+      },
+      "fcm": {
+        "default": {
+          "uri": "https://fcm.googleapis.com/v1/projects/my-project/messages:send",
+          "token": "ya29.access-token"
+        }
+      },
+      "api": {
+        "profile_name": {
+          "uri": "https://api.example.com",
+          "auth": "Bearer",
+          "token": "api-key",
+          "content_type": "application/json"
+        }
+      }
+    }
+  }
+}
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `enable` | bool | `false` | Enable/disable the process |
+| `heartbeat` | int | `60000` | Outbox check interval in milliseconds |
+| `max_in_flight` | int | `10` | Maximum concurrent message dispatches |
+| `smtp` | object | — | SMTP server profiles (name → host/port/credentials) |
+| `fcm` | object | — | FCM profiles (name → uri/token) |
+| `api` | object | — | Generic API profiles (name → uri/auth/token) |
+
+The process also requires:
+* `postgres.helper` connection string in the config
+* OAuth2 `service` credentials in `conf/oauth2/default.json`
+
+Build requirements: `WITH_POSTGRESQL`, `WITH_SSL` — both must be enabled.
 
 Installation
 -
-Follow the build and installation instructions for [Apostol](https://github.com/apostoldevel/apostol#build-and-installation).
+
+Follow the build and installation instructions for [Apostol](https://github.com/apostoldevel/apostol#building-and-installation).
 
 [^crm]: **Apostol CRM** is an abstract term, not a standalone product. It refers to any project that uses both the [Apostol](https://github.com/apostoldevel/apostol) C++ framework and [db-platform](https://github.com/apostoldevel/db-platform) together through purpose-built modules and processes. Each framework can be used independently; combined, they form a full-stack backend platform.

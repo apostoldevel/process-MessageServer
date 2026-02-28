@@ -1,233 +1,156 @@
-/*++
+#pragma once
+
+#if defined(WITH_POSTGRESQL) && defined(WITH_SSL)
+
+#include "apostol/process_module.hpp"
+#include "apostol/bot_session.hpp"
+#include "apostol/pg.hpp"
+#include "apostol/smtp_client.hpp"
+#include "apostol/fetch_client.hpp"
+
+#include <chrono>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <vector>
+
+namespace apostol
+{
+
+class Application;
+class EventLoop;
+class Logger;
+
+// --- MessageServer -----------------------------------------------------------
+//
+// Background process module that delivers outbound messages from a PostgreSQL
+// outbox table to external services (SMTP email, FCM push, HTTP API).
+//
+// Mirrors v1 CMessageServer from apostol-crm.
+//
+// Architecture: logic lives here (ProcessModule), injected into a generic
+// ModuleProcess shell via add_custom_process(unique_ptr<ProcessModule>).
+//
+// Message lifecycle:
+//   - Authenticates as "apibot" via OAuth2 client_credentials (BotSession)
+//   - Subscribes to PostgreSQL LISTEN "outbox" channel for immediate dispatch
+//   - Polls api.outbox('prepared') every minute as fallback
+//   - For each message: fetches details via api.get_service_message(id)
+//   - Routes by (agenttypecode, agentcode) to SMTP / FCM / generic API
+//   - On success: execute_object_action(id, 'done')
+//   - On failure: set_object_label(id, error) + execute_object_action(id, 'fail')
+//
+// Concurrency is bounded by max_in_flight_ to prevent overload during
+// mass mailings (the v1 pain point).
+//
+// Configuration (in apostol.json):
+//   "module": {
+//     "MessageServer": {
+//       "enable": true,
+//       "heartbeat": 60000,
+//       "max_in_flight": 10,
+//       "smtp": {
+//         "default": { "host": "smtp.host", "port": 587, "username": "...", "password": "..." }
+//       },
+//       "fcm": {
+//         "default": { "uri": "https://fcm.googleapis.com/...", "token": "..." }
+//       },
+//       "api": {
+//         "profile": { "uri": "https://...", "auth": "Bearer", "token": "..." }
+//       }
+//     }
+//   }
+//
+class MessageServer final : public ProcessModule
+{
+public:
+    std::string_view name() const override { return "message-server"; }
+
+    void on_start(EventLoop& loop, Application& app) override;
+    void heartbeat(std::chrono::system_clock::time_point now) override;
+    void on_stop() override;
+
+private:
+    using time_point   = std::chrono::system_clock::time_point;
+    using milliseconds = std::chrono::milliseconds;
+
+    // -- State ----------------------------------------------------------------
+
+    PgPool*     pool_{nullptr};
+    Logger*     logger_{nullptr};
+    EventLoop*  loop_{nullptr};
+
+    std::unique_ptr<BotSession> bot_;
+    std::unique_ptr<FetchClient> fetch_;
+
+    enum class Status { stopped, running };
+    Status status_{Status::stopped};
+
+    struct MessageInfo
+    {
+        std::string id;
+        time_point  started_at;
+        std::unique_ptr<SmtpClient> smtp_client;
+    };
+
+    std::unordered_map<std::string, MessageInfo> messages_;
+
+    // Pending message IDs from NOTIFY (processed in heartbeat)
+    std::vector<std::string> pending_messages_;
+
+    time_point   next_check_{};
+    milliseconds check_interval_{60'000};  // 1 minute
+    std::size_t  max_in_flight_{10};
 
-Program name:
+    // -- SMTP configs (profile name -> SmtpConfig) ----------------------------
+    std::unordered_map<std::string, SmtpConfig> smtp_configs_;
 
-  Apostol CRM
+    // -- HTTP connector config ------------------------------------------------
+    struct ApiProfile
+    {
+        std::string uri;
+        std::string auth;           // "Bearer" etc.
+        std::string token;
+        std::string content_type;   // "application/json" default
+    };
 
-Module Name:
+    std::unordered_map<std::string, ApiProfile> fcm_profiles_;
+    std::unordered_map<std::string, ApiProfile> api_profiles_;
 
-  MessageServer.hpp
+    // -- NOTIFY ---------------------------------------------------------------
+    void on_notify(std::string_view payload);
+    void process_notify_queue();
 
-Notices:
+    // -- Polling fallback -----------------------------------------------------
+    void check_outbox();
+    void enum_messages(std::vector<PgResult> results);
 
-  Process: Message Server
+    // -- Message lifecycle ----------------------------------------------------
+    void do_fetch(const std::string& id);
+    void dispatch_message(const std::string& id, const PgResult& res, int row);
 
-Author:
+    void send_smtp(const std::string& id, const std::string& profile,
+                   const std::string& address, const std::string& subject,
+                   const std::string& content);
+    void send_fcm(const std::string& id, const std::string& profile,
+                  const std::string& content);
+    void send_api(const std::string& id, const std::string& profile,
+                  const std::string& address, const std::string& content);
 
-  Copyright (c) Prepodobny Alen
+    void do_send(const std::string& id);
+    void do_done(const std::string& id, const std::string& msg_id = "");
+    void do_fail(const std::string& id, const std::string& error);
 
-  mailto: alienufo@inbox.ru
-  mailto: ufocomp@gmail.com
+    void delete_message(const std::string& id);
+    bool in_progress(const std::string& id) const;
+    bool under_limit() const;
 
---*/
+    void on_fatal(const std::string& error);
 
-#ifndef APOSTOL_PROCESS_MESSAGE_SERVER_HPP
-#define APOSTOL_PROCESS_MESSAGE_SERVER_HPP
-//----------------------------------------------------------------------------------------------------------------------
+    void load_config(Application& app);
+};
 
-extern "C++" {
+} // namespace apostol
 
-namespace Apostol {
-
-    namespace Processes {
-
-        class CMessageHandler;
-
-        typedef std::function<void (CMessageHandler *Handler)> COnMessageHandlerEvent;
-
-        //--------------------------------------------------------------------------------------------------------------
-
-        //-- CMessageHandler -------------------------------------------------------------------------------------------
-
-        //--------------------------------------------------------------------------------------------------------------
-
-        class CMessageServer;
-        //--------------------------------------------------------------------------------------------------------------
-
-        class CMessageHandler: public CPollConnection {
-        private:
-
-            CMessageServer *m_pServer;
-
-            CString m_Session {};
-            CString m_MessageId {};
-
-            bool m_Allow;
-
-            COnMessageHandlerEvent m_Handler;
-
-            int AddToQueue();
-            void RemoveFromQueue();
-
-        protected:
-
-            void SetAllow(bool Value) { m_Allow = Value; }
-
-        public:
-
-            CMessageHandler(CMessageServer *AServer, const CString &Session, const CString &MessageId, COnMessageHandlerEvent && Handler);
-
-            ~CMessageHandler() override;
-
-            const CString &Session() const { return m_Session; }
-            const CString &MessageId() const { return m_MessageId; }
-
-            bool Allow() const { return m_Allow; };
-            void Allow(bool Value) { SetAllow(Value); };
-
-            bool Handler();
-
-            void Close() override;
-        };
-
-        //--------------------------------------------------------------------------------------------------------------
-
-        //-- CMessageServer --------------------------------------------------------------------------------------------
-
-        //--------------------------------------------------------------------------------------------------------------
-
-        typedef TPairs<CSMTPConfig> CSMTPConfigs;
-        typedef CPollManager CQueueManager;
-        //--------------------------------------------------------------------------------------------------------------
-
-        class CMessageServer: public CProcessCustom {
-            typedef CProcessCustom inherited;
-
-        private:
-
-            CProcessStatus m_Status;
-
-            CStringList m_Sessions;
-
-            CString m_Agent;
-            CString m_Host;
-
-            /// Message in progress send...
-            CStringList m_Progress;
-
-            CQueue m_Queue;
-            CQueueManager m_QueueManager;
-
-            CProviders m_Providers;
-
-            CSMTPConfigs m_Configs;
-
-            CDateTime m_AuthDate;
-            CDateTime m_FixedDate;
-            CDateTime m_CheckDate;
-
-            CSMTPManager m_MailManager;
-
-            CStringListPairs m_Tokens;
-
-            TPairs<CStringListPairs> m_Profiles;
-
-            size_t m_MaxMessagesQueue;
-
-            void BeforeRun() override;
-            void AfterRun() override;
-
-            void Authentication();
-            void SignOut(const CString &Session);
-
-            void CheckListen();
-            void InitListen();
-
-            bool InQueue(const CString &MessageId);
-            int IndexOfMessage(const CString &MessageId);
-
-            CMessageHandler *GetMessageHandler(const CString &MessageId);
-
-            void FetchCerts(CProvider &Provider, const CString &Application);
-
-            void FetchProviders();
-            void CheckProviders();
-
-            void CheckOutbox();
-            void UnloadMessageQueue();
-
-            void DeleteHandler(CMessageHandler *AHandler);
-
-            void SendMessage(CMessageHandler *AHandler, const TPairs<CString>& Message);
-            void SendMessages(const CString &Session, const CPQueryResult& Messages);
-
-            void CreateAccessToken(const CProvider &Provider, const CString &Application, CStringList &Tokens);
-
-            CSMTPClient *GetSMTPClient(const CSMTPConfig &Config);
-
-            static void InitConfig(const CIniFile &IniFile, const CString &Profile, CStringList &Config);
-
-            void Heartbeat(CDateTime Now);
-
-        protected:
-
-            void DoTimer(CPollEventHandler *AHandler) override;
-
-            void DoError(const Delphi::Exception::Exception &E);
-
-            void DoSend(const CMessage &Message);
-            void DoDone(const CMessage &Message);
-
-            void DoMessage(CMessageHandler *AHandler);
-
-            void DoCancel(const CMessage &Message, const CString &Error);
-            void DoFail(const CMessage &Message, const CString &Error);
-
-            void DoSMTPRequest(CObject *Sender);
-            void DoSMTPReply(CObject *Sender);
-
-            void DoSMTPConnected(CObject *Sender);
-            void DoSMTPDisconnected(CObject *Sender);
-
-            void DoAPIConnected(CObject *Sender);
-            void DoAPIDisconnected(CObject *Sender);
-
-            void DoException(CTCPConnection *AConnection, const Delphi::Exception::Exception &E);
-            bool DoExecute(CTCPConnection *AConnection) override;
-
-            void DoPostgresNotify(CPQConnection *AConnection, PGnotify *ANotify);
-
-            void DoPostgresQueryExecuted(CPQPollQuery *APollQuery);
-            void DoPostgresQueryException(CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E);
-
-            void DoPQClientException(CPQClient *AClient, const Delphi::Exception::Exception &E) override;
-            void DoPQConnectException(CPQConnection *AConnection, const Delphi::Exception::Exception &E) override;
-
-        public:
-
-            explicit CMessageServer(CCustomProcess* AParent, CApplication *AApplication);
-
-            ~CMessageServer() override = default;
-
-            static class CMessageServer *CreateProcess(CCustomProcess *AParent, CApplication *AApplication) {
-                return new CMessageServer(AParent, AApplication);
-            }
-
-            int AddToQueue(CMessageHandler *AHandler);
-            void InsertToQueue(int Index, CMessageHandler *AHandler);
-            void RemoveFromQueue(CMessageHandler *AHandler);
-
-            int IndexOfProgress(const CString &MessageId);
-            int AddProgress(const CString &MessageId);
-            void DeleteProgress(const CString &MessageId);
-
-            CStringList &Progress() { return m_Progress; }
-            const CStringList &Progress() const { return m_Progress; }
-
-            CQueue &Queue() { return m_Queue; }
-            const CQueue &Queue() const { return m_Queue; }
-
-            CPollManager &QueueManager() { return m_QueueManager; }
-            const CPollManager &QueueManager() const { return m_QueueManager; }
-
-            void Run() override;
-            void Reload() override;
-        };
-        //--------------------------------------------------------------------------------------------------------------
-
-    }
-}
-
-using namespace Apostol::Processes;
-}
-#endif //APOSTOL_PROCESS_MESSAGE_SERVER_HPP
+#endif // WITH_POSTGRESQL && WITH_SSL
