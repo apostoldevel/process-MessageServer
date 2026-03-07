@@ -18,7 +18,9 @@
 * **NOTIFY-driven**: подписывается на PostgreSQL-канал `LISTEN outbox` для немедленной обработки.
 * **Polling-fallback**: каждую минуту проверяет `api.outbox('prepared')` для обнаружения пропущенных уведомлений.
 * **Контроль параллелизма**: параметр `max_in_flight` ограничивает количество одновременно обрабатываемых сообщений, предотвращая перегрузку при массовых рассылках.
-* Использует `SmtpClient` (STARTTLS) для доставки email и `FetchClient` для HTTP-коннекторов (FCM, generic API).
+* **Очистка зависших сообщений**: сообщения, находящиеся в обработке дольше `message_timeout`, автоматически удаляются для освобождения слотов параллелизма.
+* **Ограниченная очередь NOTIFY**: входящие уведомления ограничены `max_pending` для предотвращения неконтролируемого роста памяти.
+* Использует `SmtpClient` (STARTTLS) для доставки email и `FetchClient` (с настраиваемым таймаутом) для HTTP-коннекторов (FCM, generic API).
 
 ### Архитектура
 
@@ -50,10 +52,11 @@ heartbeat (1 сек)
                                     email.agent/smtp.agent → send_smtp()
                                     api.agent/fcm.agent    → send_fcm()
                                     api.agent/*            → send_api()
+        └── очистка зависших сообщений (возраст > message_timeout)
 
 NOTIFY "outbox" → on_notify(payload):
   payload = UUID сообщения
-  если !in_progress → pending_messages_.push(id)
+  если !in_progress && pending < max_pending → pending_messages_.push(id)
   → обрабатывается на следующем heartbeat
 ```
 
@@ -68,8 +71,10 @@ NOTIFY "outbox" → on_notify(payload):
 ### Машина состояний сообщения (db-platform)
 
 ```
-created ──submit──► prepared ──send──► sending ──done──► done
-                                                ──fail──► failed
+created ──submit──► prepared ──send──► sending ──done──► submitted
+                        ▲                       ──fail──► failed
+                        │              repeat ◄──────────┘
+                        └──────────── repeat ◄── submitted
 ```
 
 Модуль базы данных
@@ -100,12 +105,16 @@ MessageServer связан с модулем **`message`** платформы [d
       "enable": true,
       "heartbeat": 60000,
       "max_in_flight": 10,
+      "message_timeout": 300000,
+      "max_pending": 1000,
+      "fetch_timeout": 30000,
       "smtp": {
         "default": {
           "host": "smtp.example.com",
           "port": 587,
           "username": "noreply@example.com",
-          "password": "secret"
+          "password": "secret",
+          "from": "My Service <noreply@example.com>"
         }
       },
       "fcm": {
@@ -132,9 +141,22 @@ MessageServer связан с модулем **`message`** платформы [d
 | `enable` | bool | `false` | Включить/отключить процесс |
 | `heartbeat` | int | `60000` | Интервал проверки outbox в миллисекундах |
 | `max_in_flight` | int | `10` | Максимум одновременных отправок |
-| `smtp` | object | — | Профили SMTP-серверов (имя → host/port/credentials) |
+| `message_timeout` | int | `300000` | Таймаут зависших сообщений в миллисекундах (5 мин). Сообщения в обработке, превысившие этот возраст, удаляются для освобождения слотов параллелизма. |
+| `max_pending` | int | `1000` | Максимальный размер очереди NOTIFY. Уведомления, пришедшие при заполненной очереди, отбрасываются (восстанавливаются polling-fallback). |
+| `fetch_timeout` | int | `30000` | HTTP-таймаут для FCM/API запросов в миллисекундах |
+| `smtp` | object | — | Профили SMTP-серверов (имя → конфигурация) |
 | `fcm` | object | — | Профили FCM (имя → uri/token) |
 | `api` | object | — | Профили generic API (имя → uri/auth/token) |
+
+### Поля SMTP-профиля
+
+| Поле | Тип | По умолчанию | Описание |
+|------|-----|-------------|----------|
+| `host` | string | `"localhost"` | Имя хоста SMTP-сервера |
+| `port` | int | `587` | Порт SMTP-сервера (25=plain, 587=STARTTLS, 465=implicit TLS) |
+| `username` | string | — | Имя пользователя для аутентификации |
+| `password` | string | — | Пароль для аутентификации |
+| `from` | string | _(username)_ | Адрес отправителя. Если не указан, используется `username`. |
 
 Также необходимы:
 * Строка подключения `postgres.helper` в конфигурации

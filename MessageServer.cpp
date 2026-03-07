@@ -41,6 +41,15 @@ void MessageServer::load_config(Application& app)
     if (c.contains("max_in_flight") && c["max_in_flight"].is_number_unsigned())
         max_in_flight_ = c["max_in_flight"].get<std::size_t>();
 
+    if (c.contains("message_timeout") && c["message_timeout"].is_number())
+        message_timeout_ = milliseconds(c["message_timeout"].get<int>());
+
+    if (c.contains("max_pending") && c["max_pending"].is_number_unsigned())
+        max_pending_ = c["max_pending"].get<std::size_t>();
+
+    if (c.contains("fetch_timeout") && c["fetch_timeout"].is_number())
+        fetch_timeout_ms_ = c["fetch_timeout"].get<long>();
+
     // SMTP profiles
     if (c.contains("smtp") && c["smtp"].is_object()) {
         for (auto& [name, val] : c["smtp"].items()) {
@@ -50,6 +59,7 @@ void MessageServer::load_config(Application& app)
             sc.port     = val.value("port", 587);
             sc.username = val.value("username", "");
             sc.password = val.value("password", "");
+            sc.from     = val.value("from", "");
             smtp_configs_[name] = std::move(sc);
         }
     }
@@ -99,16 +109,18 @@ void MessageServer::on_start(EventLoop& loop, Application& app)
     // FetchClient for FCM / API HTTP dispatches
     fetch_ = std::make_unique<FetchClient>(loop);
 
+    // Load connector configs (must be before set_timeout — fetch_timeout_ms_ loaded here)
+    load_config(app);
+
+    fetch_->set_timeout(fetch_timeout_ms_);
+
     // Subscribe to LISTEN "outbox" for immediate dispatch
     pool_->listen("outbox", [this](std::string_view /*channel*/, std::string_view payload) {
         on_notify(payload);
     });
 
-    // Load connector configs
-    load_config(app);
-
-    logger_->notice("MessageServer started (check_interval={}ms, max_in_flight={})",
-                    check_interval_.count(), max_in_flight_);
+    logger_->notice("MessageServer started (check_interval={}ms, max_in_flight={}, fetch_timeout={}ms)",
+                    check_interval_.count(), max_in_flight_, fetch_timeout_ms_);
 }
 
 // --- heartbeat ---------------------------------------------------------------
@@ -133,6 +145,18 @@ void MessageServer::heartbeat(std::chrono::system_clock::time_point now)
         check_outbox();
         next_check_ = now + check_interval_;
     }
+
+    // Sweep stale messages that exceeded timeout (PG callback lost, etc.)
+    for (auto it = messages_.begin(); it != messages_.end(); ) {
+        auto age = std::chrono::duration_cast<milliseconds>(now - it->second.started_at);
+        if (age > message_timeout_) {
+            logger_->warn("MessageServer: message {} timed out after {}ms, removing",
+                             it->first, age.count());
+            it = messages_.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 // --- on_stop -----------------------------------------------------------------
@@ -156,7 +180,7 @@ void MessageServer::on_stop()
 void MessageServer::on_notify(std::string_view payload)
 {
     std::string id(payload);
-    if (!id.empty() && !in_progress(id))
+    if (!id.empty() && !in_progress(id) && pending_messages_.size() < max_pending_)
         pending_messages_.push_back(std::move(id));
 }
 
@@ -340,7 +364,7 @@ void MessageServer::send_smtp(const std::string& id, const std::string& profile,
     info.smtp_client = std::make_unique<SmtpClient>(*loop_, it->second);
 
     auto& msg       = info.smtp_client->add_message();
-    msg.from        = it->second.username;
+    msg.from        = it->second.from.empty() ? it->second.username : it->second.from;
     msg.to          = {address};
     msg.subject     = subject;
     msg.body        = content;

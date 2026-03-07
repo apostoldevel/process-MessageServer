@@ -101,7 +101,10 @@ private:
 
     time_point   next_check_{};
     milliseconds check_interval_{60'000};  // 1 minute
+    milliseconds message_timeout_{300'000}; // 5 minutes — stale message cleanup
     std::size_t  max_in_flight_{10};
+    std::size_t  max_pending_{1000};
+    long         fetch_timeout_ms_{30'000}; // 30s HTTP timeout for FCM/API
 
     // -- SMTP configs (profile name -> SmtpConfig) ----------------------------
     std::unordered_map<std::string, SmtpConfig> smtp_configs_;

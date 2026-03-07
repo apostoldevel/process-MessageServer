@@ -18,7 +18,9 @@ Key characteristics:
 * **NOTIFY-driven**: subscribes to PostgreSQL `LISTEN outbox` channel for immediate dispatch.
 * **Polling fallback**: checks `api.outbox('prepared')` every minute to catch missed notifications.
 * **Concurrency control**: `max_in_flight` parameter bounds the number of messages being processed simultaneously, preventing overload during mass mailings.
-* Uses `SmtpClient` (STARTTLS) for email delivery and `FetchClient` for HTTP-based connectors (FCM, generic API).
+* **Stale message cleanup**: messages stuck in-flight longer than `message_timeout` are automatically removed to prevent capacity loss.
+* **Bounded NOTIFY queue**: incoming notifications are capped at `max_pending` to prevent unbounded memory growth.
+* Uses `SmtpClient` (STARTTLS) for email delivery and `FetchClient` (with configurable timeout) for HTTP-based connectors (FCM, generic API).
 
 ### Architecture
 
@@ -50,10 +52,11 @@ heartbeat (1s)
                                     email.agent/smtp.agent → send_smtp()
                                     api.agent/fcm.agent    → send_fcm()
                                     api.agent/*            → send_api()
+        └── sweep stale messages (age > message_timeout)
 
 NOTIFY "outbox" → on_notify(payload):
   payload = message UUID
-  if !in_progress → pending_messages_.push(id)
+  if !in_progress && pending < max_pending → pending_messages_.push(id)
   → processed on next heartbeat
 ```
 
@@ -68,8 +71,10 @@ NOTIFY "outbox" → on_notify(payload):
 ### Message state machine (db-platform)
 
 ```
-created ──submit──► prepared ──send──► sending ──done──► done
-                                                ──fail──► failed
+created ──submit──► prepared ──send──► sending ──done──► submitted
+                        ▲                       ──fail──► failed
+                        │              repeat ◄──────────┘
+                        └──────────── repeat ◄── submitted
 ```
 
 Database module
@@ -100,12 +105,16 @@ In the application config (`conf/apostol.json`):
       "enable": true,
       "heartbeat": 60000,
       "max_in_flight": 10,
+      "message_timeout": 300000,
+      "max_pending": 1000,
+      "fetch_timeout": 30000,
       "smtp": {
         "default": {
           "host": "smtp.example.com",
           "port": 587,
           "username": "noreply@example.com",
-          "password": "secret"
+          "password": "secret",
+          "from": "My Service <noreply@example.com>"
         }
       },
       "fcm": {
@@ -130,11 +139,24 @@ In the application config (`conf/apostol.json`):
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `enable` | bool | `false` | Enable/disable the process |
-| `heartbeat` | int | `60000` | Outbox check interval in milliseconds |
+| `heartbeat` | int | `60000` | Outbox polling interval in milliseconds |
 | `max_in_flight` | int | `10` | Maximum concurrent message dispatches |
-| `smtp` | object | — | SMTP server profiles (name → host/port/credentials) |
+| `message_timeout` | int | `300000` | Stale message timeout in milliseconds (5 min). In-flight messages exceeding this age are removed to free concurrency slots. |
+| `max_pending` | int | `1000` | Maximum NOTIFY queue size. Notifications arriving when the queue is full are dropped (recovered by polling fallback). |
+| `fetch_timeout` | int | `30000` | HTTP timeout for FCM/API requests in milliseconds |
+| `smtp` | object | — | SMTP server profiles (name → config) |
 | `fcm` | object | — | FCM profiles (name → uri/token) |
 | `api` | object | — | Generic API profiles (name → uri/auth/token) |
+
+### SMTP profile fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `host` | string | `"localhost"` | SMTP server hostname |
+| `port` | int | `587` | SMTP server port (25=plain, 587=STARTTLS, 465=implicit TLS) |
+| `username` | string | — | SMTP authentication username |
+| `password` | string | — | SMTP authentication password |
+| `from` | string | _(username)_ | Envelope sender address. If omitted, `username` is used. |
 
 The process also requires:
 * `postgres.helper` connection string in the config
