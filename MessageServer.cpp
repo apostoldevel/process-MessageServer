@@ -100,7 +100,7 @@ void MessageServer::on_start(EventLoop& loop, Application& app)
     loop_   = &loop;
 
     // BotSession for apibot authentication
-    bot_ = std::make_unique<BotSession>(*pool_, "MessageServer/1.0", "localhost");
+    bot_ = std::make_unique<BotSession>(*pool_, "MessageServer/2.0", "127.0.0.1");
 
     auto [client_id, client_secret] = app.providers().credentials("service");
     if (!client_id.empty())
