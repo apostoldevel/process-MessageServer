@@ -11,6 +11,9 @@
 namespace apostol
 {
 
+static constexpr const char* kFcmUrlTemplate =
+    "https://fcm.googleapis.com/v1/projects/{}/messages:send";
+
 // --- load_config -------------------------------------------------------------
 //
 // Read SMTP / FCM / API profiles from the module config block.
@@ -405,7 +408,7 @@ void MessageServer::send_fcm(const std::string& id, const std::string& profile,
 
     std::string url = prof.uri;
     if (url.empty())
-        url = fmt::format("https://fcm.googleapis.com/v1/projects/{}/messages:send", profile);
+        url = fmt::format(kFcmUrlTemplate, profile);
 
     do_send(id);
 
