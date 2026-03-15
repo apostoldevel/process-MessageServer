@@ -510,17 +510,7 @@ void MessageServer::send_api(const std::string& id, const std::string& profile,
 
 void MessageServer::do_send(const std::string& id)
 {
-    if (!bot_->valid())
-        return;
-
-    auto sql = fmt::format(
-        "SELECT * FROM api.authorize({});\n"
-        "SELECT * FROM api.execute_object_action({}::uuid, {})",
-        pq_quote_literal(bot_->session()),
-        pq_quote_literal(id),
-        pq_quote_literal("send"));
-
-    pool_->execute(sql,
+    bot_->execute_action(id, "send",
         [](std::vector<PgResult> /*results*/) {},
         [this, id](std::string_view error) {
             logger_->error("MessageServer: do_send failed for {}: {}", id, error);
@@ -541,32 +531,33 @@ void MessageServer::do_done(const std::string& id, const std::string& msg_id)
         return;
     }
 
-    std::string sql;
     if (msg_id.empty()) {
-        sql = fmt::format(
-            "SELECT * FROM api.authorize({});\n"
-            "SELECT * FROM api.execute_object_action({}::uuid, {})",
-            pq_quote_literal(bot_->session()),
-            pq_quote_literal(id),
-            pq_quote_literal("done"));
+        bot_->execute_action(id, "done",
+            [this, id](std::vector<PgResult> /*results*/) {
+                delete_message(id);
+            },
+            [this, id](std::string_view err) {
+                logger_->error("MessageServer: do_done SQL error for {}: {}", id, err);
+                delete_message(id);
+            });
     } else {
-        sql = fmt::format(
+        auto sql = fmt::format(
             "SELECT * FROM api.authorize({});\n"
             "SELECT * FROM api.set_object_label({}::uuid, {});\n"
             "SELECT * FROM api.execute_object_action({}::uuid, {})",
             pq_quote_literal(bot_->session()),
             pq_quote_literal(id), pq_quote_literal(msg_id),
             pq_quote_literal(id), pq_quote_literal("done"));
-    }
 
-    pool_->execute(sql,
-        [this, id](std::vector<PgResult> /*results*/) {
-            delete_message(id);
-        },
-        [this, id](std::string_view err) {
-            logger_->error("MessageServer: do_done SQL error for {}: {}", id, err);
-            delete_message(id);
-        });
+        pool_->execute(sql,
+            [this, id](std::vector<PgResult> /*results*/) {
+                delete_message(id);
+            },
+            [this, id](std::string_view err) {
+                logger_->error("MessageServer: do_done SQL error for {}: {}", id, err);
+                delete_message(id);
+            });
+    }
 }
 
 // --- do_fail -----------------------------------------------------------------
