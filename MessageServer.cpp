@@ -153,8 +153,12 @@ void MessageServer::heartbeat(std::chrono::system_clock::time_point now)
     for (auto it = messages_.begin(); it != messages_.end(); ) {
         auto age = std::chrono::duration_cast<milliseconds>(now - it->second.started_at);
         if (age > message_timeout_) {
-            logger_->warn("MessageServer: message {} timed out after {}ms, removing",
+            logger_->warn("MessageServer: message {} timed out after {}ms, marking failed",
                              it->first, age.count());
+            // Mark as failed in DB before removing from memory
+            if (bot_ && bot_->valid()) {
+                do_fail(it->first, "Message processing timeout");
+            }
             it = messages_.erase(it);
         } else {
             ++it;
@@ -514,6 +518,8 @@ void MessageServer::do_send(const std::string& id)
         [](std::vector<PgResult> /*results*/) {},
         [this, id](std::string_view error) {
             logger_->error("MessageServer: do_send failed for {}: {}", id, error);
+            if (in_progress(id))
+                do_fail(id, "Failed to transition to sending state: " + std::string(error));
         });
 }
 
