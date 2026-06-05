@@ -106,7 +106,7 @@ namespace Apostol {
             m_AuthDate = 0;
             m_FixedDate = 0;
             m_CheckDate = 0;
-            m_MaxMessagesQueue = Config()->PostgresPollMin();
+            m_MaxMessagesQueue = Config()->PostgresPollMax();
 
             m_Status = psStopped;
         }
@@ -123,7 +123,7 @@ namespace Apostol {
 
             SetUser(Config()->User(), Config()->Group());
 
-            InitializePQClients(Application()->Title(), 1, m_MaxMessagesQueue);
+            InitializePQClients(Application()->Title());
 
             SigProcMask(SIG_UNBLOCK);
 
@@ -183,8 +183,8 @@ namespace Apostol {
 
             auto OnDone = [&Tokens](CTCPConnection *Sender) {
 
-                auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
-                auto &Reply = pConnection->Reply();
+                const auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
+                const auto &Reply = pConnection->Reply();
 
                 DebugReply(Reply);
 
@@ -231,14 +231,14 @@ namespace Apostol {
                 Provider.KeyStatusTime(Now());
                 Provider.KeyStatus(ksFetching);
 
-                CLocation Location(client_x509_cert_url);
+                const CLocation Location(client_x509_cert_url);
                 CHTTPRequest::Prepare(Request, "GET", Location.pathname.c_str());
             };
 
             auto OnExecute = [this, &Provider, &Application](CTCPConnection *AConnection) {
 
-                auto pConnection = dynamic_cast<CHTTPClientConnection *> (AConnection);
-                auto &Reply = pConnection->Reply();
+                const auto pConnection = dynamic_cast<CHTTPClientConnection *> (AConnection);
+                const auto &Reply = pConnection->Reply();
 
                 try {
                     DebugRequest(pConnection->Request());
@@ -262,8 +262,8 @@ namespace Apostol {
             };
 
             auto OnException = [this, &Provider](CTCPConnection *AConnection, const Delphi::Exception::Exception &E) {
-                auto pConnection = dynamic_cast<CHTTPClientConnection *> (AConnection);
-                auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
+                const auto pConnection = dynamic_cast<CHTTPClientConnection *> (AConnection);
+                const auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
 
                 Provider.KeyStatusTime(Now());
                 Provider.KeyStatus(ksFailed);
@@ -273,8 +273,8 @@ namespace Apostol {
                 Log()->Error(APP_LOG_ERR, 0, "[%s:%d] %s", pClient->Host().c_str(), pClient->Port(), E.what());
             };
 
-            CLocation Location(URI);
-            auto pClient = GetClient(Location.hostname, Location.port);
+            const CLocation Location(URI);
+            const auto pClient = GetClient(Location.hostname, Location.port);
 
             pClient->OnRequest(OnRequest);
             pClient->OnExecute(OnExecute);
@@ -319,9 +319,9 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        int CMessageServer::IndexOfMessage(const CString &MessageId) {
+        int CMessageServer::IndexOfMessage(const CString &MessageId) const {
             for (int i = 0; i < m_QueueManager.Count(); ++i) {
-                auto pMessageHandler = dynamic_cast<CMessageHandler *> (m_QueueManager[i]);
+                const auto pMessageHandler = dynamic_cast<CMessageHandler *> (m_QueueManager[i]);
                 if (pMessageHandler != nullptr) {
                     if (pMessageHandler->MessageId() == MessageId)
                         return i;
@@ -331,12 +331,12 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        bool CMessageServer::InQueue(const CString &MessageId) {
+        bool CMessageServer::InQueue(const CString &MessageId) const {
             return IndexOfMessage(MessageId) != -1;
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        CMessageHandler *CMessageServer::GetMessageHandler(const CString &MessageId) {
+        CMessageHandler *CMessageServer::GetMessageHandler(const CString &MessageId) const {
             const auto index = IndexOfMessage(MessageId);
             if (index != -1)
                 return dynamic_cast<CMessageHandler *> (m_QueueManager[index]);
@@ -344,7 +344,7 @@ namespace Apostol {
         }
         //--------------------------------------------------------------------------------------------------------------
 
-        int CMessageServer::IndexOfProgress(const CString &MessageId) {
+        int CMessageServer::IndexOfProgress(const CString &MessageId) const {
             return m_Progress.IndexOf(MessageId);
         }
         //--------------------------------------------------------------------------------------------------------------
@@ -393,7 +393,7 @@ namespace Apostol {
             if (index != -1) {
                 const auto pQueue = m_Queue[index];
                 for (int i = 0; i < pQueue->Count(); ++i) {
-                    auto pHandler = (CMessageHandler *) pQueue->Item(i);
+                    const auto pHandler = (CMessageHandler *) pQueue->Item(i);
                     if (pHandler != nullptr) {
                         pHandler->Handler();
                     }
@@ -509,7 +509,7 @@ namespace Apostol {
 
             auto OnExecuted = [this](CPQPollQuery *APollQuery) {
                 try {
-                    auto pResult = APollQuery->Results(0);
+                    const auto pResult = APollQuery->Results(0);
 
                     if (pResult->ExecStatus() != PGRES_COMMAND_OK) {
                         throw Delphi::Exception::EDBError("%s", pResult->GetErrorMessage());
@@ -552,10 +552,10 @@ namespace Apostol {
 
             auto OnExecuted = [this](CPQPollQuery *APollQuery) {
 
-                CPQueryResults pqResults;
                 CStringList SQL;
 
                 try {
+                    CPQueryResults pqResults;
                     CApostolModule::QueryToResults(APollQuery, pqResults);
 
                     const auto &login = pqResults[0];
@@ -616,7 +616,7 @@ namespace Apostol {
         void CMessageServer::SendMessage(CMessageHandler *AHandler, const TPairs<CString> &Message) {
 
             auto OnSMTPClient = [this, AHandler](const CSMTPConfig &Config) {
-                auto pClient = GetSMTPClient(Config);
+                const auto pClient = GetSMTPClient(Config);
                 pClient->AutoFree(true);
                 pClient->Data().Values("session", AHandler->Session());
                 return pClient;
@@ -624,7 +624,7 @@ namespace Apostol {
             //----------------------------------------------------------------------------------------------------------
 
             auto OnHTTPClient = [this](const CLocation &URI) {
-                auto pClient = GetClient(URI.hostname, URI.port);
+                const auto pClient = GetClient(URI.hostname, URI.port);
 #if defined(_GLIBCXX_RELEASE) && (_GLIBCXX_RELEASE >= 9)
                 pClient->OnConnected([this](auto &&Sender) { DoAPIConnected(Sender); });
                 pClient->OnDisconnected([this](auto &&Sender) { DoAPIDisconnected(Sender); });
@@ -650,14 +650,14 @@ namespace Apostol {
 
             auto OnFCMExecute = [](CTCPConnection *Sender) {
 
-                auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
-                auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
+                const auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
+                const auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
 
-                auto &Reply = pConnection->Reply();
+                const auto &Reply = pConnection->Reply();
 
                 DebugReply(Reply);
 
-                auto pMessage = dynamic_cast<CMessage *> (pClient->Data().Objects("message"));
+                const auto pMessage = dynamic_cast<CMessage *> (pClient->Data().Objects("message"));
                 if (pMessage != nullptr) {
                     const CJSON Json(Reply.Content);
 
@@ -684,16 +684,16 @@ namespace Apostol {
 
             auto OnAPIExecute = [this](CTCPConnection *Sender) {
 
-                auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
-                auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
+                const auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
+                const auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
 
                 pClient->Data().Values("state", "done");
 
-                auto &Reply = pConnection->Reply();
+                const auto &Reply = pConnection->Reply();
 
                 DebugReply(Reply);
 
-                auto pMessage = dynamic_cast<CMessage *> (pClient->Data().Objects("message"));
+                const auto pMessage = dynamic_cast<CMessage *> (pClient->Data().Objects("message"));
                 if (pMessage != nullptr) {
 
                     const auto& agent = pClient->Data()["agent"];
@@ -719,8 +719,8 @@ namespace Apostol {
 
             auto OnException = [](CTCPConnection *Sender, const Delphi::Exception::Exception &E) {
 
-                auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
-                auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
+                const auto pConnection = dynamic_cast<CHTTPClientConnection *> (Sender);
+                const auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
 
                 pClient->Data().Values("state", "fail");
 
@@ -730,7 +730,7 @@ namespace Apostol {
 
                 Log()->Error(APP_LOG_ERR, 0, "[%s:%d] %s", host.empty() ? "unknown" : host.c_str(), pClient->Port(), E.what());
 
-                auto pMessage = dynamic_cast<CMessage *> (pClient->Data().Objects("message"));
+                const auto pMessage = dynamic_cast<CMessage *> (pClient->Data().Objects("message"));
                 if (pMessage != nullptr) {
                     pMessage->Fail(E.what());
                 }
@@ -787,12 +787,12 @@ namespace Apostol {
 
             auto OnExecuted = [this](CPQPollQuery *APollQuery) {
 
-                CPQueryResults pqResults;
                 CStringList SQL;
 
                 const auto &session = APollQuery->Data()["session"];
 
                 try {
+                    CPQueryResults pqResults;
                     CApostolModule::QueryToResults(APollQuery, pqResults);
 
                     const auto &authorize = pqResults[QUERY_INDEX_AUTH].First();
@@ -819,7 +819,7 @@ namespace Apostol {
                 api::outbox(SQL, "prepared");
 
                 try {
-                    auto pQuery = ExecSQL(SQL, nullptr, OnExecuted, OnException);
+                    const auto pQuery = ExecSQL(SQL, nullptr, OnExecuted, OnException);
                     pQuery->Data().AddPair("session", session);
                 } catch (Delphi::Exception::Exception &E) {
                     DoError(E);
@@ -868,17 +868,18 @@ namespace Apostol {
 
             auto OnExecuted = [this](CPQPollQuery *APollQuery) {
 
-                CPQueryResults pqResults;
                 CStringList SQL;
 
-                auto pHandler = dynamic_cast<CMessageHandler *> (APollQuery->Binding());
+                const auto pHandler = dynamic_cast<CMessageHandler *> (APollQuery->Binding());
 
                 if (pHandler == nullptr) {
                     return;
                 }
 
                 try {
+                    CPQueryResults pqResults;
                     CApostolModule::QueryToResults(APollQuery, pqResults);
+
                     const auto &messages = pqResults[QUERY_INDEX_DATA];
                     if (messages.Count() > 0) {
                         for (int i = 0; i < messages.Count(); ++i) {
@@ -894,7 +895,7 @@ namespace Apostol {
             };
 
             auto OnException = [this](CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
-                auto pHandler = dynamic_cast<CMessageHandler *> (APollQuery->Binding());
+                const auto pHandler = dynamic_cast<CMessageHandler *> (APollQuery->Binding());
                 DeleteHandler(pHandler);
                 DoError(E);
             };
@@ -924,7 +925,7 @@ namespace Apostol {
         void CMessageServer::DoTimer(CPollEventHandler *AHandler) {
             uint64_t exp;
 
-            auto pTimer = dynamic_cast<CEPollTimer *> (AHandler->Binding());
+            const auto pTimer = dynamic_cast<CEPollTimer *> (AHandler->Binding());
             pTimer->Read(&exp, sizeof(uint64_t));
 
             try {
@@ -971,12 +972,12 @@ namespace Apostol {
         void CMessageServer::DoDone(const CMessage &Message) {
 
             auto OnExecuted = [this](CPQPollQuery *APollQuery) {
-                auto pHandler = dynamic_cast<CMessageHandler *> (APollQuery->Binding());
+                const auto pHandler = dynamic_cast<CMessageHandler *> (APollQuery->Binding());
                 DeleteHandler(pHandler);
             };
 
             auto OnException = [this](CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
-                auto pHandler = dynamic_cast<CMessageHandler *> (APollQuery->Binding());
+                const auto pHandler = dynamic_cast<CMessageHandler *> (APollQuery->Binding());
                 DeleteHandler(pHandler);
                 DoError(E);
             };
@@ -1004,12 +1005,12 @@ namespace Apostol {
         void CMessageServer::DoFail(const CMessage &Message, const CString &Error) {
 
             auto OnExecuted = [this](CPQPollQuery *APollQuery) {
-                auto pHandler = dynamic_cast<CMessageHandler *> (APollQuery->Binding());
+                const auto pHandler = dynamic_cast<CMessageHandler *> (APollQuery->Binding());
                 DeleteHandler(pHandler);
             };
 
             auto OnException = [this](CPQPollQuery *APollQuery, const Delphi::Exception::Exception &E) {
-                auto pHandler = dynamic_cast<CMessageHandler *> (APollQuery->Binding());
+                const auto pHandler = dynamic_cast<CMessageHandler *> (APollQuery->Binding());
                 DeleteHandler(pHandler);
                 DoError(E);
             };
@@ -1031,9 +1032,9 @@ namespace Apostol {
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::DoSMTPConnected(CObject *Sender) {
-            auto pConnection = dynamic_cast<CSMTPConnection *>(Sender);
+            const auto pConnection = dynamic_cast<CSMTPConnection *>(Sender);
             if (Assigned(pConnection)) {
-                auto pClient = dynamic_cast<CSMTPClient *> (pConnection->Client());
+                const auto pClient = dynamic_cast<CSMTPClient *> (pConnection->Client());
                 if (Assigned(pClient)) {
                     for (int i = 0; i < pClient->Messages().Count(); ++i)
                         DoSend(pClient->Messages()[i]);
@@ -1045,7 +1046,7 @@ namespace Apostol {
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::DoSMTPDisconnected(CObject *Sender) {
-            auto pConnection = dynamic_cast<CSMTPConnection *>(Sender);
+            const auto pConnection = dynamic_cast<CSMTPConnection *>(Sender);
             if (Assigned(pConnection)) {
                 if (!pConnection->ClosedGracefully()) {
                     Log()->Notice(_T("[%s:%d] SMTP client disconnected."), pConnection->Socket()->Binding()->PeerIP(),
@@ -1058,11 +1059,11 @@ namespace Apostol {
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::DoAPIConnected(CObject *Sender) {
-            auto pConnection = dynamic_cast<CHTTPClientConnection *>(Sender);
+            const auto pConnection = dynamic_cast<CHTTPClientConnection *>(Sender);
             if (Assigned(pConnection)) {
-                auto pSocket = pConnection->Socket();
+                const auto pSocket = pConnection->Socket();
                 if (pSocket != nullptr) {
-                    auto pHandle = pSocket->Binding();
+                    const auto pHandle = pSocket->Binding();
                     if (pHandle != nullptr) {
                         Log()->Notice(_T("[%s:%d] API client connected."), pHandle->PeerIP(), pHandle->PeerPort());
                     }
@@ -1072,20 +1073,21 @@ namespace Apostol {
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::DoAPIDisconnected(CObject *Sender) {
-            auto pConnection = dynamic_cast<CHTTPClientConnection *>(Sender);
+            const auto pConnection = dynamic_cast<CHTTPClientConnection *>(Sender);
             if (Assigned(pConnection)) {
-                auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
+                const auto pClient = dynamic_cast<CHTTPClient *> (pConnection->Client());
                 if (Assigned(pClient)) {
-                    auto pMessage = dynamic_cast<CMessage *> (pClient->Data().Objects("message"));
-                    chASSERT(pMessage);
-                    if (pClient->Data()["state"] == "created") {
-                        pMessage->Fail("Connection timeout expired.");
+                    const auto pMessage = dynamic_cast<CMessage *> (pClient->Data().Objects("message"));
+                    if (Assigned(pMessage)) {
+                        if (pClient->Data()["state"] == "created") {
+                            pMessage->Fail("Connection timeout expired.");
+                        }
+                        delete pMessage;
                     }
-                    delete pMessage;
                 }
-                auto pSocket = pConnection->Socket();
+                const auto pSocket = pConnection->Socket();
                 if (pSocket != nullptr) {
-                    auto pHandle = pSocket->Binding();
+                    const auto pHandle = pSocket->Binding();
                     if (pHandle != nullptr) {
                         Log()->Notice(_T("[%s:%d] API client disconnected."), pHandle->PeerIP(), pHandle->PeerPort());
                     }
@@ -1097,8 +1099,8 @@ namespace Apostol {
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::DoException(CTCPConnection *AConnection, const Delphi::Exception::Exception &E) {
-            auto pConnection = dynamic_cast<CSMTPConnection *> (AConnection);
-            auto pClient = dynamic_cast<CSMTPClient *> (pConnection->Client());
+            const auto pConnection = dynamic_cast<CSMTPConnection *> (AConnection);
+            const auto pClient = dynamic_cast<CSMTPClient *> (pConnection->Client());
 
             CStringList SQL;
 
@@ -1115,8 +1117,8 @@ namespace Apostol {
 
             try {
                 ExecSQL(SQL);
-            } catch (Delphi::Exception::Exception &E) {
-                DoError(E);
+            } catch (Delphi::Exception::Exception &e) {
+                DoError(e);
             }
         }
         //--------------------------------------------------------------------------------------------------------------
@@ -1141,10 +1143,9 @@ namespace Apostol {
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::DoPostgresQueryExecuted(CPQPollQuery *APollQuery) {
-            CPQResult *pResult;
             try {
-                for (int I = 0; I < APollQuery->Count(); I++) {
-                    pResult = APollQuery->Results(I);
+                for (int i = 0; i < APollQuery->Count(); i++) {
+                    const auto pResult = APollQuery->Results(i);
 
                     if (pResult->ExecStatus() != PGRES_TUPLES_OK)
                         throw Delphi::Exception::EDBError("%s", pResult->GetErrorMessage());
@@ -1176,7 +1177,7 @@ namespace Apostol {
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::DoSMTPRequest(CObject *Sender) {
-            auto pConnection = dynamic_cast<CSMTPConnection *>(Sender);
+            const auto pConnection = dynamic_cast<CSMTPConnection *>(Sender);
             const auto& command = pConnection->Command();
             CMemoryStream Stream;
             command.ToBuffers(Stream);
@@ -1187,7 +1188,7 @@ namespace Apostol {
         //--------------------------------------------------------------------------------------------------------------
 
         void CMessageServer::DoSMTPReply(CObject *Sender) {
-            auto pConnection = dynamic_cast<CSMTPConnection *>(Sender);
+            const auto pConnection = dynamic_cast<CSMTPConnection *>(Sender);
             const auto& command = pConnection->Command();
             DebugMessage("S: %s", command.Reply().Text().c_str());
         }

@@ -124,19 +124,16 @@ namespace Apostol {
 
             size_t m_MaxMessagesQueue;
 
-            void BeforeRun() override;
-            void AfterRun() override;
-
             void Authentication();
             void SignOut(const CString &Session);
 
             void CheckListen();
             void InitListen();
 
-            bool InQueue(const CString &MessageId);
-            int IndexOfMessage(const CString &MessageId);
+            bool InQueue(const CString &MessageId) const;
+            int IndexOfMessage(const CString &MessageId) const;
 
-            CMessageHandler *GetMessageHandler(const CString &MessageId);
+            CMessageHandler *GetMessageHandler(const CString &MessageId) const;
 
             void FetchCerts(CProvider &Provider, const CString &Application);
 
@@ -160,6 +157,9 @@ namespace Apostol {
             void Heartbeat(CDateTime Now);
 
         protected:
+
+            void BeforeRun() override;
+            void AfterRun() override;
 
             void DoTimer(CPollEventHandler *AHandler) override;
 
@@ -199,7 +199,7 @@ namespace Apostol {
 
             ~CMessageServer() override = default;
 
-            static class CMessageServer *CreateProcess(CCustomProcess *AParent, CApplication *AApplication) {
+            static CMessageServer *CreateProcess(CCustomProcess *AParent, CApplication *AApplication) {
                 return new CMessageServer(AParent, AApplication);
             }
 
@@ -207,7 +207,7 @@ namespace Apostol {
             void InsertToQueue(int Index, CMessageHandler *AHandler);
             void RemoveFromQueue(CMessageHandler *AHandler);
 
-            int IndexOfProgress(const CString &MessageId);
+            int IndexOfProgress(const CString &MessageId) const;
             int AddProgress(const CString &MessageId);
             void DeleteProgress(const CString &MessageId);
 
