@@ -733,6 +733,17 @@ namespace Apostol {
                 const auto pMessage = dynamic_cast<CMessage *> (pClient->Data().Objects("message"));
                 if (pMessage != nullptr) {
                     pMessage->Fail(E.what());
+
+                    // DoAPIDisconnected() never fires after an exception (CPollEventHandler::Stop()
+                    // just drops the fd, it does not go through Disconnect()), so this is the only
+                    // place that frees pMessage for the failed-request path. Clear the stored pointer
+                    // before deleting so a later lookup can never see a dangling "message" object.
+                    const int index = pClient->Data().IndexOfName("message");
+                    if (index != -1) {
+                        pClient->Data().Objects(index, nullptr);
+                    }
+
+                    delete pMessage;
                 }
             };
 
