@@ -201,9 +201,16 @@ void MessageServer::process_notify_queue()
     auto pending = std::move(pending_messages_);
     pending_messages_.clear();
 
+    // The message notification carries no session — pg_notify('message', …) names
+    // the message, not the scope — so ask every scope, as v1 did by creating a
+    // handler per session. Only the one that finds the row takes the message on;
+    // the others see no rows and drop out.
     for (auto& id : pending) {
-        if (!in_progress(id) && under_limit())
-            do_fetch(id);
+        if (in_progress(id) || !under_limit())
+            continue;
+
+        for (const auto& session : bot_->sessions())
+            do_fetch(session, id);
     }
 }
 
@@ -218,19 +225,24 @@ void MessageServer::check_outbox()
     if (!bot_->valid())
         return;
 
-    auto sql = fmt::format(
-        "SELECT * FROM api.authorize({});\n"
-        "SELECT * FROM api.outbox('prepared') ORDER BY created",
-        pq_quote_literal(bot_->session()));
+    // One pass per scope: api.outbox answers within the authorized session's scope,
+    // so a single pass under the first session leaves every other scope's outbox
+    // unsent. v1 looped over api.get_sessions; the port kept one.
+    for (const auto& session : bot_->sessions()) {
+        auto sql = fmt::format(
+            "SELECT * FROM api.authorize({});\n"
+            "SELECT * FROM api.outbox('prepared') ORDER BY created",
+            pq_quote_literal(session));
 
-    pool_->execute(sql,
-        [this](std::vector<PgResult> results) {
-            enum_messages(std::move(results));
-        },
-        [this](std::string_view error) {
-            on_fatal(std::string(error));
-        },
-        /*quiet=*/true);
+        pool_->execute(sql,
+            [this, session](std::vector<PgResult> results) {
+                enum_messages(session, std::move(results));
+            },
+            [this](std::string_view error) {
+                on_fatal(std::string(error));
+            },
+            /*quiet=*/true);
+    }
 }
 
 // --- enum_messages -----------------------------------------------------------
@@ -238,7 +250,7 @@ void MessageServer::check_outbox()
 // For each message in the outbox, enqueue for fetch if not already in progress.
 //
 
-void MessageServer::enum_messages(std::vector<PgResult> results)
+void MessageServer::enum_messages(const std::string& session, std::vector<PgResult> results)
 {
     if (results.size() < 2 || !results[1].ok())
         return;
@@ -256,7 +268,7 @@ void MessageServer::enum_messages(std::vector<PgResult> results)
             continue;
 
         if (!in_progress(id) && under_limit())
-            do_fetch(id);
+            do_fetch(session, id);
     }
 }
 
@@ -267,28 +279,30 @@ void MessageServer::enum_messages(std::vector<PgResult> results)
 // Then dispatch based on agent type.
 //
 
-void MessageServer::do_fetch(const std::string& id)
+void MessageServer::do_fetch(const std::string& session, const std::string& id)
 {
     if (!bot_->valid())
         return;
 
-    messages_[id] = MessageInfo{id, std::chrono::system_clock::now(), nullptr};
-
+    // Not registered yet. Several scopes may be asked about the same message at
+    // once (see process_notify_queue), and only the one that finds it may claim it —
+    // registering up front would let the first answer, whichever it was, delete the
+    // work the finder is about to do.
     auto sql = fmt::format(
         "SELECT * FROM api.authorize({});\n"
         "SELECT * FROM api.get_service_message({}::uuid)",
-        pq_quote_literal(bot_->session()),
+        pq_quote_literal(session),
         pq_quote_literal(id));
 
     pool_->execute(sql,
-        [this, id](std::vector<PgResult> results) {
-            if (!in_progress(id))
-                return;
+        [this, id, session](std::vector<PgResult> results) {
+            if (results.size() < 2 || !results[1].ok() || results[1].rows() == 0)
+                return;   // not in this scope — another one has it, or nobody has
 
-            if (results.size() < 2 || !results[1].ok() || results[1].rows() == 0) {
-                delete_message(id);
-                return;
-            }
+            if (in_progress(id))
+                return;   // another scope got there first
+
+            messages_[id] = MessageInfo{id, session, std::chrono::system_clock::now(), nullptr};
 
             dispatch_message(id, results[1], 0);
         },
@@ -514,7 +528,7 @@ void MessageServer::send_api(const std::string& id, const std::string& profile,
 
 void MessageServer::do_send(const std::string& id)
 {
-    bot_->execute_action(id, "send",
+    bot_->execute_action(message_session(id), id, "send",
         [](std::vector<PgResult> /*results*/) {},
         [this, id](std::string_view error) {
             logger_->error("MessageServer: do_send failed for {}: {}", id, error);
@@ -538,7 +552,7 @@ void MessageServer::do_done(const std::string& id, const std::string& msg_id)
     }
 
     if (msg_id.empty()) {
-        bot_->execute_action(id, "done",
+        bot_->execute_action(message_session(id), id, "done",
             [this, id](std::vector<PgResult> /*results*/) {
                 delete_message(id);
             },
@@ -596,6 +610,12 @@ void MessageServer::do_fail(const std::string& id, const std::string& error)
 }
 
 // --- delete_message / in_progress / under_limit ------------------------------
+
+std::string MessageServer::message_session(const std::string& id) const
+{
+    auto it = messages_.find(id);
+    return it == messages_.end() ? bot_->session() : it->second.session;
+}
 
 void MessageServer::delete_message(const std::string& id)
 {

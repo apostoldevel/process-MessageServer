@@ -90,6 +90,7 @@ private:
     struct MessageInfo
     {
         std::string id;
+        std::string session;      // the scope this message was found in; act in it
         time_point  started_at;
         std::unique_ptr<SmtpClient> smtp_client;
     };
@@ -127,10 +128,13 @@ private:
 
     // -- Polling fallback -----------------------------------------------------
     void check_outbox();
-    void enum_messages(std::vector<PgResult> results);
+    void enum_messages(const std::string& session, std::vector<PgResult> results);
 
     // -- Message lifecycle ----------------------------------------------------
-    void do_fetch(const std::string& id);
+    void do_fetch(const std::string& session, const std::string& id);
+
+    /// The session a message was found under, or the first if no longer tracked.
+    std::string message_session(const std::string& id) const;
     void dispatch_message(const std::string& id, const PgResult& res, int row);
 
     void send_smtp(const std::string& id, const std::string& profile,
