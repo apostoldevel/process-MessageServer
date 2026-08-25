@@ -294,6 +294,9 @@ void MessageServer::do_fetch(const std::string& session, const std::string& id)
         pq_quote_literal(session),
         pq_quote_literal(id));
 
+    // quiet: the statement carries a session code. PgPool prints statement
+    // text at debug into postgres.log — inside the container, readable
+    // by any process there.
     pool_->execute(sql,
         [this, id, session](std::vector<PgResult> results) {
             if (results.size() < 2 || !results[1].ok() || results[1].rows() == 0)
@@ -311,7 +314,8 @@ void MessageServer::do_fetch(const std::string& session, const std::string& id)
                 do_fail(id, std::string(error));
             else
                 delete_message(id);
-        });
+        },
+        /*quiet=*/true);
 }
 
 // --- dispatch_message --------------------------------------------------------
@@ -569,6 +573,9 @@ void MessageServer::do_done(const std::string& id, const std::string& msg_id)
             pq_quote_literal(id), pq_quote_literal(msg_id),
             pq_quote_literal(id), pq_quote_literal("done"));
 
+        // quiet: the statement carries a session code. PgPool prints statement
+        // text at debug into postgres.log — inside the container, readable
+        // by any process there.
         pool_->execute(sql,
             [this, id](std::vector<PgResult> /*results*/) {
                 delete_message(id);
@@ -576,7 +583,8 @@ void MessageServer::do_done(const std::string& id, const std::string& msg_id)
             [this, id](std::string_view err) {
                 logger_->error("MessageServer: do_done SQL error for {}: {}", id, err);
                 delete_message(id);
-            });
+            },
+        /*quiet=*/true);
     }
 }
 
@@ -599,6 +607,9 @@ void MessageServer::do_fail(const std::string& id, const std::string& error)
         pq_quote_literal(id), pq_quote_literal(error),
         pq_quote_literal(id), pq_quote_literal("fail"));
 
+    // quiet: the statement carries a session code. PgPool prints statement
+    // text at debug into postgres.log — inside the container, readable
+    // by any process there.
     pool_->execute(sql,
         [this, id](std::vector<PgResult> /*results*/) {
             delete_message(id);
@@ -606,7 +617,8 @@ void MessageServer::do_fail(const std::string& id, const std::string& error)
         [this, id](std::string_view err) {
             logger_->error("MessageServer: do_fail SQL error for {}: {}", id, err);
             delete_message(id);
-        });
+        },
+        /*quiet=*/true);
 }
 
 // --- delete_message / in_progress / under_limit ------------------------------
