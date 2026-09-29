@@ -532,13 +532,18 @@ void MessageServer::send_api(const std::string& id, const std::string& profile,
 
 void MessageServer::do_send(const std::string& id)
 {
+    // Sent again after a lost connection (T627), here and in do_done/do_fail:
+    // `send` exists only in `prepared`, `done` and `fail` only in `prepared`
+    // and `sending`, so a repeat of one that committed is refused by the
+    // workflow and lands where `never` would have — the error handler.
     bot_->execute_action(message_session(id), id, "send",
         [](std::vector<PgResult> /*results*/) {},
         [this, id](std::string_view error) {
             logger_->error("MessageServer: do_send failed for {}: {}", id, error);
             if (in_progress(id))
                 do_fail(id, "Failed to transition to sending state: " + std::string(error));
-        });
+        },
+        PgRetry::if_lost);
 }
 
 // --- do_done -----------------------------------------------------------------
@@ -563,7 +568,8 @@ void MessageServer::do_done(const std::string& id, const std::string& msg_id)
             [this, id](std::string_view err) {
                 logger_->error("MessageServer: do_done SQL error for {}: {}", id, err);
                 delete_message(id);
-            });
+            },
+            PgRetry::if_lost);
     } else {
         auto sql = fmt::format(
             "SELECT * FROM api.authorize({});\n"
@@ -584,7 +590,7 @@ void MessageServer::do_done(const std::string& id, const std::string& msg_id)
                 logger_->error("MessageServer: do_done SQL error for {}: {}", id, err);
                 delete_message(id);
             },
-        /*quiet=*/true);
+        /*quiet=*/true, PgRetry::if_lost);
     }
 }
 
@@ -618,7 +624,7 @@ void MessageServer::do_fail(const std::string& id, const std::string& error)
             logger_->error("MessageServer: do_fail SQL error for {}: {}", id, err);
             delete_message(id);
         },
-        /*quiet=*/true);
+        /*quiet=*/true, PgRetry::if_lost);
 }
 
 // --- delete_message / in_progress / under_limit ------------------------------
