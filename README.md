@@ -77,6 +77,21 @@ created ──submit──► prepared ──send──► sending ──done─
                         └──────────── repeat ◄── submitted
 ```
 
+One sender per message: the notify channel `outbox` in mode `single`
+-
+
+With several copies of the application, every MessageServer hears `NOTIFY outbox` and polls, and the first to read a message sends it — two copies may send one message. When the db-platform `notify` module has the channel `outbox` in mode `single` (switched per installation, when every copy is new), a new message is not a notification but a row of `notify.queue`, handed to **one** MessageServer under a token:
+
+- a row waits in the process while `max_in_flight` messages are out; one that waited past half the channel's `lease` is given back unsent;
+- the message is read in every scope of the bot session (the row carries no scope) and handled by its state: `prepared` → the action `send`, under `notify.hold` (committed only while the row is still this sender's), and the delivery starts only once `send` is **committed** (nothing leaves before it; a `send` not committed is given back unsent); `sending` — an earlier holder may have sent it: `fail`, *outcome unknown*, never sent twice; anything else — confirmed, nothing to send;
+- the outcome — `notify.hold` (the row is locked first, under its token), `done` or `fail` with the label, and `notify.ack` — is **one transaction**, in the scope the message was found in. A sender whose row was handed to another is refused there (`NT409`), and what it wrote is rolled back: the message is the other sender's;
+- an outcome is written before the lease runs out: a delivery out longer than `min(message_timeout, lease − 30 s)`, counted from the take (the wait for a slot included), is failed;
+- there is no poll on this path: a lost wake-up is repeated by `notify.sweep`. A row closed without a confirmation is settled by the channel's `on_abandon` (`OutboxAbandon`).
+
+On stop MessageServer takes nothing new, gives back what is not handed to a transport yet, and waits for the deliveries out (`process.stop_timeout`). One still out when the wait ends is dropped **without** being refused: it may have gone out, so its row returns by its lease and the next holder finds the message in `sending` — *outcome unknown*, not a second letter.
+
+MessageServer reads the channel's mode every 10 s until it is `single`, and from then on keeps the subscriber; the notification path stays for messages sent before the switch (a copy that hears their notification sends them). The poll waits for the first answer of the probe of the `notify` module and then asks the channel's mode in the same statement, finding nothing once the channel is `single`: a message of the old path that missed its notification is not picked up after the switch. The path is not taken up — an error in the log — when the channel's `lease` is 30 s or shorter. It needs libapostol with `NotifySubscriber` (built `WITH_DB_PLATFORM`) and db-platform with `notify.hold`; without them only the notification path is built or used. After the switch the process leader gate `module.message-server.leader` is set to `false` by the installation: every copy runs MessageServer.
+
 Database module
 -
 
